@@ -1,52 +1,42 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, Response, status
 
 from ecom_be.api.deps import Probe, get_database_probe, get_redis_probe
 from ecom_be.core.config import Settings, get_settings
 
-from .schemas.response import LivenessResponse, ReadinessResponse
+from .schemas.response import LivenessEnvelope, ReadinessEnvelope
 from .services import HealthService
 
 router = APIRouter(prefix="/health", tags=["health"])
 
 
-def _as_probe(candidate: Probe | bool) -> Probe:
-    """Normalize real probes and simple test override results."""
-
-    if callable(candidate):
-        return candidate
-
-    async def probe() -> bool:
-        return candidate
-
-    return probe
-
-
-@router.get("/live", response_model=LivenessResponse)
+@router.get("/live", response_model=LivenessEnvelope)
 def liveness(
     settings: Annotated[Settings, Depends(get_settings)],
-) -> LivenessResponse:
-    return HealthService(settings).liveness()
+) -> LivenessEnvelope:
+    return LivenessEnvelope(data=HealthService(settings).liveness())
 
 
 @router.get(
     "/ready",
-    response_model=ReadinessResponse,
-    responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ReadinessResponse}},
+    response_model=ReadinessEnvelope,
+    responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ReadinessEnvelope}},
 )
 async def readiness(
+    response: Response,
     database_probe: Annotated[Probe, Depends(get_database_probe)],
     redis_probe: Annotated[Probe, Depends(get_redis_probe)],
-) -> ReadinessResponse | JSONResponse:
-    result = await HealthService().readiness(
-        _as_probe(database_probe),
-        _as_probe(redis_probe),
-    )
+) -> ReadinessEnvelope:
+    """Report dependency readiness.
+
+    The status code is the signal and the body shape is identical at 200 and at
+    503, which is what lets a client read "not ready" as a state rather than as a
+    transport failure. Setting ``response.status_code`` is how that is expressed
+    without hand-building a response body.
+    """
+
+    result = await HealthService().readiness(database_probe, redis_probe)
     if result.status == "not_ready":
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content=result.model_dump(),
-        )
-    return result
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    return ReadinessEnvelope(data=result)
