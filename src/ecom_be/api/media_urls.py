@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from fastapi import Request
 
-from ecom_be.modules.identity.models import Shop, User
+from ecom_be.models.identity import Shop, User
 
 AVATAR_PATH = "/api/v1/media/avatar"
 BACKGROUND_PATH = "/api/v1/media/shop-background"

@@ -1,6 +1,6 @@
 from redis.asyncio import Redis, from_url
 
-from ecom_be.core.config import Settings, get_settings
+from ecom_be.config.settings import Settings, get_settings
 
 
 def create_redis_client(settings: Settings | None = None) -> Redis:

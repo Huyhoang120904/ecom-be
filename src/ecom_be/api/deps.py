@@ -7,16 +7,17 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ecom_be.core.config import Settings, get_settings
-from ecom_be.infrastructure.db import session as db_session
-from ecom_be.modules.identity import repository, utils
-from ecom_be.modules.identity.errors import (
+from ecom_be.api.principal import Principal
+from ecom_be.config.settings import Settings, get_settings
+from ecom_be.errors.identity import (
     AccountInactive,
     Forbidden,
     InvalidToken,
     ShopNotAccessible,
 )
-from ecom_be.modules.identity.principal import Principal
+from ecom_be.infrastructure.db import session as db_session
+from ecom_be.repositories import identity as repository
+from ecom_be.utils import identity as utils
 
 get_db_session = db_session.get_db_session
 

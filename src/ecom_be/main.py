@@ -5,8 +5,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from ecom_be.api.deps import get_application_db_session
-from ecom_be.api.router import api_router
-from ecom_be.core.config import Settings, get_settings
+from ecom_be.api.v1 import api_router
+from ecom_be.config.settings import Settings, get_settings
 from ecom_be.core.errors import register_exception_handlers
 from ecom_be.core.logging import configure_logging
 from ecom_be.infrastructure.cache.redis import create_redis_client

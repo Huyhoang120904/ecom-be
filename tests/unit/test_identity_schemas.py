@@ -10,7 +10,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from ecom_be.modules.identity.schemas.request import (
+from ecom_be.schemas.identity.request import (
     DeactivateRequest,
     DeleteShopRequest,
     LoginRequest,
@@ -19,7 +19,7 @@ from ecom_be.modules.identity.schemas.request import (
     ShopUpdateRequest,
     SwitchShopRequest,
 )
-from ecom_be.modules.identity.schemas.response import (
+from ecom_be.schemas.identity.response import (
     MeEnvelope,
     SessionEnvelope,
     ShopEnvelope,

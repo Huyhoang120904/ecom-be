@@ -75,7 +75,7 @@ def _migrated_database_url() -> str:
 def clear_settings_cache():
     """Keep the cached settings from leaking one test's environment into the next."""
 
-    from ecom_be.core.config import get_settings
+    from ecom_be.config.settings import get_settings
 
     yield
     get_settings.cache_clear()
@@ -156,9 +156,9 @@ async def db_async_client(db_transaction, tmp_path) -> AsyncIterator[AsyncClient
     """
 
     from ecom_be.api.deps import get_application_db_session, get_optional_redis_client
+    from ecom_be.api.v1.media import get_storage
+    from ecom_be.infrastructure.storage.local import LocalStorageBackend
     from ecom_be.main import app
-    from ecom_be.modules.media.router import get_storage
-    from ecom_be.modules.media.storage import LocalStorageBackend
 
     factory = async_sessionmaker(bind=db_transaction, expire_on_commit=False)
 

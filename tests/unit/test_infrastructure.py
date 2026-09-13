@@ -44,7 +44,7 @@ async def test_db_session_dependency_yields_one_session_without_committing(monke
 
 
 def test_redis_client_factory_uses_decoding_and_configured_url(monkeypatch):
-    from ecom_be.core.config import Settings
+    from ecom_be.config.settings import Settings
     from ecom_be.infrastructure.cache import redis as redis_module
 
     captured = {}
@@ -70,7 +70,7 @@ def test_redis_client_factory_uses_decoding_and_configured_url(monkeypatch):
 
 
 def test_database_engine_factory_uses_async_url_and_pre_ping(monkeypatch):
-    from ecom_be.core.config import Settings
+    from ecom_be.config.settings import Settings
     from ecom_be.infrastructure.db import session as db_session
 
     captured = {}

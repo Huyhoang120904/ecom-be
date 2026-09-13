@@ -11,8 +11,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ecom_be.modules.identity import repository
-from ecom_be.modules.identity.utils import hash_refresh_token
+from ecom_be.repositories import identity as repository
+from ecom_be.utils.identity import hash_refresh_token
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
 

@@ -12,14 +12,14 @@ from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from ecom_be.api.deps import get_current_principal, require_permissions, require_roles
+from ecom_be.api.principal import Principal
 from ecom_be.core.errors import register_exception_handlers
-from ecom_be.modules.identity.errors import (
+from ecom_be.errors.identity import (
     AccountInactive,
     Forbidden,
     InvalidToken,
     ShopNotAccessible,
 )
-from ecom_be.modules.identity.principal import Principal
 
 pytestmark = pytest.mark.anyio
 

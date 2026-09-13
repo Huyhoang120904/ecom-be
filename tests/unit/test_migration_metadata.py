@@ -1,11 +1,10 @@
-"""Contract: Alembic autogenerate sees module ORM models through one named view.
+"""Contract: Alembic autogenerate sees every ORM model through one named view.
 
 A model that is never imported is invisible to ``Base.metadata``, so
-``alembic revision --autogenerate`` emits an empty revision. The import site
-that aggregates module models is ``ecom_be/infrastructure/db/models.py``; it is
-the location ``alembic/env.py`` and both docs name, and this test fails if a
-module gains a ``models.py`` that the view does not genuinely import and
-register.
+``alembic revision --autogenerate`` emits an empty revision. The import site that
+aggregates the models is ``ecom_be/models/__init__.py``; it is the location
+``alembic/env.py`` and both docs name, and this test fails if a model module
+exists that the view does not genuinely import and register.
 
 The aggregation guard is behavioural, not textual: it parses the view's AST for
 the modules it actually imports (so a commented-out import line cannot satisfy
@@ -21,11 +20,14 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).parents[2]
 SRC_ROOT = REPO_ROOT / "src"
-METADATA_VIEW = SRC_ROOT / "ecom_be" / "infrastructure" / "db" / "models.py"
-MODULES_DIR = SRC_ROOT / "ecom_be" / "modules"
-METADATA_VIEW_DOC_PATH = "src/ecom_be/infrastructure/db/models.py"
-MODULES_PACKAGE = "ecom_be.modules"
+METADATA_VIEW = SRC_ROOT / "ecom_be" / "models" / "__init__.py"
+MODELS_DIR = SRC_ROOT / "ecom_be" / "models"
+METADATA_VIEW_DOC_PATH = "src/ecom_be/models/__init__.py"
+MODELS_PACKAGE = "ecom_be.models"
 SHARED_BASE_NAME = "Base"
+
+# ``__init__.py`` is the view itself, not a model module.
+NON_MODEL_FILES = {"__init__.py"}
 
 
 def _module_path(dotted: str) -> Path:
@@ -38,10 +40,11 @@ def _module_exists(dotted: str) -> bool:
 
 
 def _discovered_model_modules() -> set[str]:
-    """Dotted names of every module that ships a ``models.py``."""
+    """Dotted names of every model module in ``ecom_be/models/``."""
     return {
-        f"{MODULES_PACKAGE}.{models_file.parent.name}.models"
-        for models_file in sorted(MODULES_DIR.glob("*/models.py"))
+        f"{MODELS_PACKAGE}.{model_file.stem}"
+        for model_file in sorted(MODELS_DIR.glob("*.py"))
+        if model_file.name not in NON_MODEL_FILES
     }
 
 
@@ -82,19 +85,19 @@ def _classes_declared_on_the_shared_base(models_file: Path) -> set[str]:
 
 
 def _registered_module_classes() -> set[str]:
-    """ORM classes actually registered on the shared metadata by module models."""
+    """ORM classes actually registered on the shared metadata by model modules."""
     from ecom_be.infrastructure.db.base import Base
 
     return {
         mapper.class_.__name__
         for mapper in Base.registry.mappers
-        if str(mapper.class_.__module__).startswith(f"{MODULES_PACKAGE}.")
+        if str(mapper.class_.__module__).startswith(f"{MODELS_PACKAGE}.")
     }
 
 
 def test_metadata_view_exports_the_shared_base_metadata():
     from ecom_be.infrastructure.db.base import Base
-    from ecom_be.infrastructure.db.models import metadata
+    from ecom_be.models import metadata
 
     assert metadata is Base.metadata
 
@@ -102,11 +105,11 @@ def test_metadata_view_exports_the_shared_base_metadata():
 def test_alembic_env_targets_the_named_metadata_view():
     env_source = (REPO_ROOT / "alembic" / "env.py").read_text()
 
-    assert "from ecom_be.infrastructure.db.models import metadata" in env_source
+    assert "from ecom_be.models import metadata" in env_source
     assert "target_metadata = metadata" in env_source
 
 
-def test_every_module_models_file_is_imported_and_registered_by_the_metadata_view():
+def test_every_model_module_is_imported_and_registered_by_the_metadata_view():
     discovered = _discovered_model_modules()
     imported = _imported_modules_in_view()
 
@@ -118,8 +121,8 @@ def test_every_module_models_file_is_imported_and_registered_by_the_metadata_vie
     )
 
     # Real import of the aggregation view: this is what Alembic autogenerate
-    # loads, and it is what must have executed every module's model imports.
-    metadata_view = importlib.import_module("ecom_be.infrastructure.db.models")
+    # loads, and it is what must have executed every model module's imports.
+    metadata_view = importlib.import_module("ecom_be.models")
 
     registered = _registered_module_classes()
     assert set(metadata_view.__all__) == registered, (

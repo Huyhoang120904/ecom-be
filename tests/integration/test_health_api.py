@@ -346,7 +346,7 @@ async def test_cors_uses_validated_origin_and_allows_credentials():
     from httpx import ASGITransport, AsyncClient
     from pydantic import PostgresDsn, RedisDsn
 
-    from ecom_be.core.config import Settings
+    from ecom_be.config.settings import Settings
     from ecom_be.main import create_app
 
     settings = Settings(
