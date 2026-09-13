@@ -27,6 +27,9 @@ def configure_settings_environment(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("APP_NAME", "ecom-be")
     monkeypatch.setenv("DATABASE_URL", _database_url_value())
     monkeypatch.setenv("REDIS_URL", _redis_url_value())
+    # Required with no default: a missing signing secret refuses startup, so every
+    # test that constructs Settings needs one.
+    monkeypatch.setenv("JWT_SECRET", "test-secret-that-is-long-enough-32")
     yield
 
     from ecom_be.core.config import get_settings

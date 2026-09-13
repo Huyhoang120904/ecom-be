@@ -8,6 +8,26 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 logger = logging.getLogger(__name__)
 
 
+class AppError(Exception):
+    """A domain failure with a fixed, safe client-facing representation.
+
+    The status code and the stable ``code`` live on the class, so a service
+    describes what went wrong without knowing anything about HTTP, and
+    ``core.errors`` renders every domain failure in one place.
+
+    ``message`` is a class constant and is never assembled from request data: a
+    message built from input is reflection under a different name, and returning
+    exception detail to a client is forbidden.
+
+    Subclasses live in the module that owns the meaning, because ``core`` must not
+    import a feature module. ``modules/identity/errors.py`` is the reference.
+    """
+
+    code: str = "internal_server_error"
+    status_code: int = 500
+    message: str = "Internal server error"
+
+
 _HTTP_ERROR_MESSAGES: dict[int, tuple[str, str]] = {
     400: ("bad_request", "Bad request"),
     401: ("unauthorized", "Authentication required"),
@@ -22,6 +42,18 @@ _HTTP_ERROR_MESSAGES: dict[int, tuple[str, str]] = {
     503: ("service_unavailable", "Service unavailable"),
     504: ("gateway_timeout", "Gateway timeout"),
 }
+
+
+def app_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Render a domain error with the same body shape as every other failure."""
+
+    del request
+    if not isinstance(exc, AppError):
+        raise exc
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"error": exc.code, "message": exc.message},
+    )
 
 
 def http_exception_handler(
@@ -77,8 +109,15 @@ def internal_server_error_handler(
 
 
 def register_exception_handlers(application: FastAPI) -> None:
-    """Register the application's stable error response handlers."""
+    """Register the application's stable error response handlers.
 
+    Every failure the API can produce, whether raised by a service or by the
+    framework, is rendered as ``{"error": <code>, "message": <text>}``. That single
+    shape is what lets a client handle errors without inspecting stack traces or
+    string matching.
+    """
+
+    application.add_exception_handler(AppError, app_error_handler)
     application.add_exception_handler(
         RequestValidationError, request_validation_exception_handler
     )
