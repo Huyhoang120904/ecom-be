@@ -14,10 +14,12 @@ from ecom_be.errors.identity import (
 )
 from ecom_be.infrastructure.security.passwords import verify_password
 from ecom_be.models.identity import Role, Shop, User
-from ecom_be.repositories import membership as membership_repository
-from ecom_be.repositories import refresh_token as refresh_token_repository
-from ecom_be.repositories import shop as shop_repository
-from ecom_be.repositories import user as user_repository
+from ecom_be.repositories import (
+    membership_repository,
+    refresh_token_repository,
+    shop_repository,
+    user_repository,
+)
 
 
 class AccountService:

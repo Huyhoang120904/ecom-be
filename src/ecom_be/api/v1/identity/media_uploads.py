@@ -14,14 +14,13 @@ from ecom_be.api.deps import (
     get_optional_redis_client,
 )
 from ecom_be.api.principal import Principal
-from ecom_be.api.v1.identity.common import _client_key, _me_data
+from ecom_be.api.v1.identity.common import _client_key, _me_data, me_response
 from ecom_be.api.v1.media import get_media_service
-from ecom_be.schemas.identity import MeEnvelope
-from ecom_be.services.identity import (
-    IdentityService,
-)
-from ecom_be.services.media import MediaService
-from ecom_be.services.rate_limit import (
+from ecom_be.schemas.common import BaseResponse
+from ecom_be.schemas.identity import MeData
+from ecom_be.services.account_service import AccountService
+from ecom_be.services.media_service import MediaService
+from ecom_be.services.rate_limit_service import (
     UPLOAD_LIMIT,
     UPLOAD_WINDOW_SECONDS,
     RateLimitStore,
@@ -31,7 +30,7 @@ from ecom_be.services.rate_limit import (
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
-@router.post("/me/avatar", response_model=MeEnvelope)
+@router.post("/me/avatar", response_model=BaseResponse[MeData])
 async def upload_avatar(
     request: Request,
     principal: Annotated[Principal, Depends(get_current_principal)],
@@ -39,7 +38,7 @@ async def upload_avatar(
     media: Annotated[MediaService, Depends(get_media_service)],
     file: Annotated[UploadFile, File()],
     redis: Annotated[RateLimitStore | None, Depends(get_optional_redis_client)] = None,
-) -> MeEnvelope:
+) -> BaseResponse[MeData]:
     """Replace the caller's avatar.
 
     The previous object is left in place rather than deleted: its key is content
@@ -54,7 +53,7 @@ async def upload_avatar(
         window_seconds=UPLOAD_WINDOW_SECONDS,
     )
     payload = await file.read()
-    service = IdentityService(session)
+    service = AccountService(session)
     key = await media.store_avatar(
         user_id=uuid.UUID(principal.user_id),
         image_bytes=payload,
@@ -66,7 +65,7 @@ async def upload_avatar(
         user_id=uuid.UUID(principal.user_id),
         shop_id=uuid.UUID(principal.active_shop_id),
     )
-    return MeEnvelope(data=_me_data(user, shop, memberships, permissions, request))
+    return me_response(_me_data(user, shop, memberships, permissions, request))
 
 
 @router.delete("/me/avatar", status_code=status.HTTP_204_NO_CONTENT)
@@ -77,7 +76,7 @@ async def delete_avatar(
 ) -> None:
     """Remove the caller's avatar. Idempotent: a second call is also 204."""
 
-    service = IdentityService(session)
+    service = AccountService(session)
     user = await service.get_user(uuid.UUID(principal.user_id))
     if user.avatar_key:
         await media.delete(user.avatar_key)

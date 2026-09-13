@@ -20,17 +20,17 @@ from ecom_be.api.v1.identity.common import (
     _client_key,
     _session_data,
     _set_refresh_cookie,
+    session_response,
 )
+from ecom_be.schemas.common import BaseResponse
 from ecom_be.schemas.identity import (
     LoginRequest,
     RegisterRequest,
-    SessionEnvelope,
+    SessionData,
     SwitchShopRequest,
 )
-from ecom_be.services.identity import (
-    IdentityService,
-)
-from ecom_be.services.rate_limit import (
+from ecom_be.services.auth_service import AuthService
+from ecom_be.services.rate_limit_service import (
     LOGIN_LIMIT,
     LOGIN_WINDOW_SECONDS,
     REGISTER_LIMIT,
@@ -44,7 +44,7 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 @router.post(
     "/register",
-    response_model=SessionEnvelope,
+    response_model=BaseResponse[SessionData],
     status_code=status.HTTP_201_CREATED,
 )
 async def register(
@@ -53,7 +53,7 @@ async def register(
     response: Response,
     session: Annotated[AsyncSession, Depends(get_application_db_session)],
     redis: Annotated[RateLimitStore | None, Depends(get_optional_redis_client)],
-) -> SessionEnvelope:
+) -> BaseResponse[SessionData]:
     """Create an account and its first shop, then sign in."""
 
     await enforce_rate_limit(
@@ -62,7 +62,7 @@ async def register(
         limit=REGISTER_LIMIT,
         window_seconds=REGISTER_WINDOW_SECONDS,
     )
-    result = await IdentityService(session).register(
+    result = await AuthService(session).register(
         email=payload.email,
         password=payload.password,
         full_name=payload.full_name,
@@ -74,24 +74,24 @@ async def register(
         result.refresh_token,
         request.app.state.settings.refresh_token_ttl_seconds,
     )
-    return SessionEnvelope(data=_session_data(result, request))
+    return session_response(_session_data(result, request))
 
 
-@router.post("/login", response_model=SessionEnvelope)
+@router.post("/login", response_model=BaseResponse[SessionData])
 async def login(
     payload: LoginRequest,
     request: Request,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_application_db_session)],
     redis: Annotated[RateLimitStore | None, Depends(get_optional_redis_client)],
-) -> SessionEnvelope:
+) -> BaseResponse[SessionData]:
     await enforce_rate_limit(
         redis,
         key=_client_key(request, "login"),
         limit=LOGIN_LIMIT,
         window_seconds=LOGIN_WINDOW_SECONDS,
     )
-    result = await IdentityService(session).login(
+    result = await AuthService(session).login(
         email=payload.email, password=payload.password
     )
     _set_refresh_cookie(
@@ -100,25 +100,25 @@ async def login(
         result.refresh_token,
         request.app.state.settings.refresh_token_ttl_seconds,
     )
-    return SessionEnvelope(data=_session_data(result, request))
+    return session_response(_session_data(result, request))
 
 
-@router.post("/refresh", response_model=SessionEnvelope)
+@router.post("/refresh", response_model=BaseResponse[SessionData])
 async def refresh(
     request: Request,
     response: Response,
     session: Annotated[AsyncSession, Depends(get_application_db_session)],
-) -> SessionEnvelope:
+) -> BaseResponse[SessionData]:
     """Rotate the refresh cookie and issue a new access token."""
 
-    result = await IdentityService(session).refresh(request.cookies.get(REFRESH_COOKIE))
+    result = await AuthService(session).refresh(request.cookies.get(REFRESH_COOKIE))
     _set_refresh_cookie(
         response,
         request,
         result.refresh_token,
         request.app.state.settings.refresh_token_ttl_seconds,
     )
-    return SessionEnvelope(data=_session_data(result, request))
+    return session_response(_session_data(result, request))
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -129,19 +129,19 @@ async def logout(
 ) -> None:
     """End the session. Always 204: a client leaving has nothing to learn."""
 
-    await IdentityService(session).logout(request.cookies.get(REFRESH_COOKIE))
+    await AuthService(session).logout(request.cookies.get(REFRESH_COOKIE))
     _clear_refresh_cookie(response)
 
 
-@router.post("/switch-shop", response_model=SessionEnvelope)
+@router.post("/switch-shop", response_model=BaseResponse[SessionData])
 async def switch_shop(
     payload: SwitchShopRequest,
     request: Request,
     response: Response,
     principal: Annotated[Principal, Depends(get_current_principal)],
     session: Annotated[AsyncSession, Depends(get_application_db_session)],
-) -> SessionEnvelope:
-    result = await IdentityService(session).switch_shop(
+) -> BaseResponse[SessionData]:
+    result = await AuthService(session).switch_shop(
         user_id=uuid.UUID(principal.user_id),
         shop_id=payload.shop_id,
         refresh_token=request.cookies.get(REFRESH_COOKIE),
@@ -152,4 +152,4 @@ async def switch_shop(
         result.refresh_token,
         request.app.state.settings.refresh_token_ttl_seconds,
     )
-    return SessionEnvelope(data=_session_data(result, request))
+    return session_response(_session_data(result, request))

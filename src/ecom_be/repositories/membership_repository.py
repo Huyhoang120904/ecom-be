@@ -24,8 +24,7 @@ from ecom_be.models.identity import (
     Shop,
     User,
 )
-from ecom_be.repositories import role as role_repository
-from ecom_be.repositories import user as user_repository
+from ecom_be.repositories import role_repository, user_repository
 
 
 async def create_membership(

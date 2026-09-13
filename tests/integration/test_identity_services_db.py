@@ -19,12 +19,14 @@ from ecom_be.errors.identity import (
     NotAMember,
     ShopNotAccessible,
 )
-from ecom_be.repositories import membership as membership_repository
-from ecom_be.repositories import refresh_token as refresh_token_repository
-from ecom_be.repositories import role as role_repository
-from ecom_be.repositories import shop as shop_repository
-from ecom_be.repositories import user as user_repository
-from ecom_be.services.identity import IdentityService
+from ecom_be.repositories import (
+    membership_repository,
+    refresh_token_repository,
+    role_repository,
+    shop_repository,
+    user_repository,
+)
+from ecom_be.services.identity_service import IdentityService
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
 

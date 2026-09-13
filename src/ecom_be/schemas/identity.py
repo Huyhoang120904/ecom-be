@@ -5,18 +5,19 @@ and every rule delegates to ``ecom_be.utils.identity``, so each rule has exactly
 implementation and the published OpenAPI document carries a ``maxLength`` for every
 string it declares.
 
-Responses: a concrete envelope subclass per endpoint, never a bare
-``BaseResponse[Thing]`` -- a bare generic makes OpenAPI name the schema
-``BaseResponse_Thing_``, which leaks the type-variable name into every generated
-client type. Note what is *not* here: no ORM model is ever returned, and no password
-hash, refresh token, or media object key appears in any response. ``avatar_key`` and
-``background_key`` stay server-side; the client receives a derived URL instead, so the
-deployment's storage layout never becomes part of the contract.
+Responses: the payload models only. The envelope they travel in is
+``schemas/common.py``'s ``BaseResponse``, which each router applies as
+``response_model=BaseResponse[MeData]``, so a response shape is declared once and the
+envelope is not re-declared per endpoint. Note what is *not* here: no ORM model is
+ever returned, and no password hash, refresh token, or media object key appears in any
+response. ``avatar_key`` and ``background_key`` stay server-side; the client receives
+a derived URL instead, so the deployment's storage layout never becomes part of the
+contract.
 
 Two rules the contract gates enforce: every string in a response is bounded,
 including list members, because a client generating from the document should not have
 to guess a maximum (``tests/unit/test_openapi_string_limits.py``); and every ``2xx``
-body is an envelope (``tests/unit/test_openapi_envelope.py``).
+body is a ``BaseResponse`` (``tests/unit/test_openapi_envelope.py``).
 
 A partial update is expressed by an optional field defaulting to ``None``.
 ``model_fields_set`` is what distinguishes "absent, leave it alone" from "explicitly
@@ -49,7 +50,6 @@ from ecom_be.constants.identity import (
     SHOP_WEBSITE_MAX,
     URL_MAX,
 )
-from ecom_be.schemas.common import BaseResponse
 from ecom_be.utils import identity as utils
 
 
@@ -306,12 +306,3 @@ class MeData(BaseModel):
     active_shop: ShopData
     memberships: list[MembershipData]
     permissions: list[PermissionKey]
-
-
-class SessionEnvelope(BaseResponse[SessionData]): ...
-
-
-class MeEnvelope(BaseResponse[MeData]): ...
-
-
-class ShopEnvelope(BaseResponse[ShopData]): ...

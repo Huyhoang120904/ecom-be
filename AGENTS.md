@@ -40,9 +40,9 @@ src/ecom_be/
 │   └── storage/local.py        # StorageBackend protocol + local adapter
 ├── models/                     # ORM models, one module per feature
 │   └── __init__.py             # imports every model; the Alembic target_metadata
-├── schemas/                    # transport shapes (common.py envelope, one file per feature)
+├── schemas/                    # transport shapes (common.py BaseResponse, one file per feature)
 ├── repositories/               # database operations, one module per owning model
-├── services/                   # use cases, one module per feature or per seam
+├── services/                   # use cases, one module per service
 ├── errors/                     # domain errors, one module per feature
 ├── constants/                  # contract bounds, one module per feature
 ├── utils/                      # pure helpers, one module per feature
@@ -60,14 +60,27 @@ the database engine. Repositories and routes never create their own clients.
 ## Feature layers
 
 A feature is a name that appears in whichever layers it needs. `identity` is the
-reference: `models/identity.py`, `repositories/{user,shop,role,membership,refresh_token}.py`,
-`services/identity/{auth,account,shop}.py`, `errors/identity.py`,
+reference: `models/identity.py`, `repositories/{user,shop,role,membership,refresh_token}_repository.py`,
+`services/{identity,auth,account,shop,session}_service.py`, `errors/identity.py`,
 `constants/identity.py`, `utils/identity.py`, `schemas/identity.py`, and
-`api/v1/identity/`. The paths are literal — a feature never invents another
+`api/v1/identity/`. The names are literal — a feature never invents another
 shape. Layers a feature has nothing for are simply absent (`media` and `health`
 persist nothing, so they have no model, no repository, and no constants), and a
-feature that outgrows one file splits per owning model in `repositories/` or per
-use-case seam in `services/<feature>/`.
+feature that outgrows one module splits per owning model in `repositories/` or
+per use-case seam in `services/`.
+
+### The response envelope
+
+`schemas/common.py` declares the one `BaseResponse`, and every route applies it
+directly as `response_model=BaseResponse[YourData]`. It carries `status_code`
+(echoing the HTTP status the route returned), `message`, and `data`. Do not add a
+per-endpoint envelope subclass: that convention existed only to keep the generic's
+type-variable name out of the published schema names, and it cost a class per
+endpoint plus a parallel naming convention in the frontend's generated types.
+`tests/unit/test_openapi_envelope.py` holds the document to this and pins the
+envelope's own fields.
+
+Errors are not enveloped: they keep `{"error", "message"}` from `core/errors.py`.
 
 ### Layer rules
 
@@ -78,14 +91,14 @@ use-case seam in `services/<feature>/`.
 - **Services own use cases.** A service decides what happens: which repository
   calls run, in what order, and what the result means. Collaborators arrive
   through the constructor so services are testable without a database. When a
-  feature's use cases span several aggregates, split them by seam
-  (`services/identity/{auth,account,shop}.py`) and keep a composite
-  `IdentityService` in the package `__init__.py` as the single entry point, so
-  routers and tests are not rewritten when a seam moves.
+  feature's use cases span several aggregates, split them per seam
+  (`services/{auth,account,shop}_service.py`) and keep the composite
+  (`IdentityService` in `services/identity_service.py`) as the single entry point,
+  so routers and tests are not rewritten when a seam moves.
 - **Repositories own database operations, one module per owning model.**
-  `repositories/<model>.py` is the only layer that executes statements against
-  that table, so a table's SQL has exactly one home. It receives a session and
-  never commits implicitly — one request-scoped session is yielded per request
+  `repositories/<model>_repository.py` is the only layer that executes statements
+  against that table, so a table's SQL has exactly one home. It receives a session
+  and never commits implicitly — one request-scoped session is yielded per request
   with no implicit commit, so a use case decides transaction boundaries
   explicitly, and a use case that writes four tables still commits once.
 - **`utils/<feature>.py` is pure.** Deterministic helpers with no I/O, no
@@ -95,7 +108,8 @@ use-case seam in `services/<feature>/`.
   coroutine is a defect, not a style preference.
 - **Schemas define the API boundary.** ORM models are never returned directly;
   `schemas/<feature>.py` models are the contract and are what
-  `/api/v1/openapi.json` publishes.
+  `/api/v1/openapi.json` publishes. Every route response is
+  `BaseResponse[<payload>]`, never a bare payload and never a new envelope class.
 
 ### Adding a feature
 

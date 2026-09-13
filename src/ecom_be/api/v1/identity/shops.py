@@ -14,24 +14,23 @@ from ecom_be.api.deps import (
     require_permissions,
 )
 from ecom_be.api.principal import Principal
-from ecom_be.api.v1.identity.common import _client_key, _shop_data
+from ecom_be.api.v1.identity.common import _client_key, _shop_data, shop_response
 from ecom_be.api.v1.media import get_media_service
-from ecom_be.schemas.identity import DeleteShopRequest, ShopEnvelope, ShopUpdateRequest
-from ecom_be.services.identity import (
-    IdentityService,
-)
-from ecom_be.services.media import MediaService
-from ecom_be.services.rate_limit import (
+from ecom_be.schemas.common import BaseResponse
+from ecom_be.schemas.identity import DeleteShopRequest, ShopData, ShopUpdateRequest
+from ecom_be.services.media_service import MediaService
+from ecom_be.services.rate_limit_service import (
     UPLOAD_LIMIT,
     UPLOAD_WINDOW_SECONDS,
     RateLimitStore,
     enforce_rate_limit,
 )
+from ecom_be.services.shop_service import ShopService
 
 shops_router = APIRouter(prefix="/api/v1/shops", tags=["shops"])
 
 
-@shops_router.post("/active/background", response_model=ShopEnvelope)
+@shops_router.post("/active/background", response_model=BaseResponse[ShopData])
 async def upload_background(
     request: Request,
     principal: Annotated[Principal, Depends(require_permissions("shop:update"))],
@@ -39,7 +38,7 @@ async def upload_background(
     media: Annotated[MediaService, Depends(get_media_service)],
     file: Annotated[UploadFile, File()],
     redis: Annotated[RateLimitStore | None, Depends(get_optional_redis_client)] = None,
-) -> ShopEnvelope:
+) -> BaseResponse[ShopData]:
     await enforce_rate_limit(
         redis,
         key=_client_key(request, "upload"),
@@ -52,10 +51,10 @@ async def upload_background(
         image_bytes=payload,
         declared_content_type=file.content_type or "application/octet-stream",
     )
-    shop = await IdentityService(session).set_shop_background(
+    shop = await ShopService(session).set_shop_background(
         shop_id=uuid.UUID(principal.active_shop_id), key=key
     )
-    return ShopEnvelope(data=_shop_data(shop, request))
+    return shop_response(_shop_data(shop, request))
 
 
 @shops_router.delete("/active/background", status_code=status.HTTP_204_NO_CONTENT)
@@ -64,28 +63,28 @@ async def delete_background(
     session: Annotated[AsyncSession, Depends(get_application_db_session)],
     media: Annotated[MediaService, Depends(get_media_service)],
 ) -> None:
-    service = IdentityService(session)
+    service = ShopService(session)
     shop = await service.active_shop(uuid.UUID(principal.active_shop_id))
     if shop.background_key:
         await media.delete(shop.background_key)
     await service.set_shop_background(shop_id=shop.id, key=None)
 
 
-@shops_router.patch("/active", response_model=ShopEnvelope)
+@shops_router.patch("/active", response_model=BaseResponse[ShopData])
 async def update_active_shop(
     payload: ShopUpdateRequest,
     request: Request,
     principal: Annotated[Principal, Depends(require_permissions("shop:update"))],
     session: Annotated[AsyncSession, Depends(get_application_db_session)],
-) -> ShopEnvelope:
+) -> BaseResponse[ShopData]:
     """Update the active shop's profile. The slug is not part of the contract."""
 
-    service = IdentityService(session)
+    service = ShopService(session)
     changes = {field: getattr(payload, field) for field in payload.model_fields_set}
     shop = await service.update_active_shop(
         shop_id=uuid.UUID(principal.active_shop_id), changes=changes
     )
-    return ShopEnvelope(data=_shop_data(shop, request))
+    return shop_response(_shop_data(shop, request))
 
 
 @shops_router.delete("/active", status_code=status.HTTP_204_NO_CONTENT)
@@ -96,7 +95,7 @@ async def delete_active_shop(
 ) -> None:
     """Retire the shop. Confirmed by its own name, read from the database."""
 
-    await IdentityService(session).delete_active_shop(
+    await ShopService(session).delete_active_shop(
         shop_id=uuid.UUID(principal.active_shop_id),
         confirm_shop_name=payload.confirm_shop_name,
     )

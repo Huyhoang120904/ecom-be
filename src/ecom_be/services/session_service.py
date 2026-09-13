@@ -19,8 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ecom_be.config.settings import Settings
 from ecom_be.errors.identity import NotAMember
 from ecom_be.models.identity import Role, Shop, User
-from ecom_be.repositories import membership as membership_repository
-from ecom_be.repositories import refresh_token as refresh_token_repository
+from ecom_be.repositories import membership_repository, refresh_token_repository
 from ecom_be.utils import identity as utils
 
 

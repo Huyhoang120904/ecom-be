@@ -38,12 +38,14 @@ from ecom_be.infrastructure.security.passwords import (
     verify_dummy,
     verify_password,
 )
-from ecom_be.repositories import membership as membership_repository
-from ecom_be.repositories import refresh_token as refresh_token_repository
-from ecom_be.repositories import role as role_repository
-from ecom_be.repositories import shop as shop_repository
-from ecom_be.repositories import user as user_repository
-from ecom_be.services.identity.session import Session, issue_session
+from ecom_be.repositories import (
+    membership_repository,
+    refresh_token_repository,
+    role_repository,
+    shop_repository,
+    user_repository,
+)
+from ecom_be.services.session_service import Session, issue_session
 from ecom_be.utils import identity as utils
 
 logger = logging.getLogger(__name__)

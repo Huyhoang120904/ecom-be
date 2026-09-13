@@ -21,10 +21,12 @@ async def test_readiness_endpoint_returns_ok_for_healthy_dependencies(async_clie
 
     assert response.status_code == 200
     assert response.json() == {
+        "status_code": 200,
+        "message": "Success",
         "data": {
             "status": "ok",
             "dependencies": {"database": "ok", "redis": "ok"},
-        }
+        },
     }
 
 
@@ -47,13 +49,16 @@ async def test_readiness_endpoint_returns_503_for_unavailable_dependency(async_c
         app.dependency_overrides.clear()
 
     assert response.status_code == 503
-    # The body is the same envelope at 503 as at 200: the status code is the
-    # signal, and the shape is identical so a client can unwrap unconditionally.
+    # The body is the same envelope at 503 as at 200, and its ``status_code`` echoes
+    # the code the route returned, so a client can read the outcome from the body it
+    # already has. The shape is identical, so the unwrap is still unconditional.
     assert response.json() == {
+        "status_code": 503,
+        "message": "Success",
         "data": {
             "status": "not_ready",
             "dependencies": {"database": "ok", "redis": "unavailable"},
-        }
+        },
     }
 
 

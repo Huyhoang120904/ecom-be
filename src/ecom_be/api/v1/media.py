@@ -18,9 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ecom_be.api.deps import get_application_db_session
 from ecom_be.errors.media import ImageNotFound
 from ecom_be.infrastructure.storage.local import LocalStorageBackend, StorageBackend
-from ecom_be.repositories import shop as shop_repository
-from ecom_be.repositories import user as user_repository
-from ecom_be.services.media import MediaService
+from ecom_be.repositories import shop_repository, user_repository
+from ecom_be.services.media_service import MediaService
 
 router = APIRouter(prefix="/api/v1/media", tags=["media"])
 

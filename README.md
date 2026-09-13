@@ -225,13 +225,22 @@ other route requires a bearer token.
 | `GET /api/v1/media/avatar/{user_id}.webp` | public | Serve an avatar |
 | `GET /api/v1/media/shop-background/{shop_id}.webp` | public | Serve a shop background |
 
-Every `2xx` response with a body is wrapped: `{"data": {...}}`. Errors are never
+Every `2xx` response with a body is wrapped in `BaseResponse`:
+
+```json
+{ "status_code": 201, "message": "Success", "data": { "...": "..." } }
+```
+
+`status_code` echoes the HTTP status on the response, so a client can read the
+outcome from the body it already has; `header` is authoritative if the two ever
+disagreed. The shape is identical at every status, including the readiness route's
+`503`, so the unwrap is unconditional. Errors are never
 wrapped, and keep the `{"error": "<stable_code>", "message": "<safe text>"}`
 shape. Internal exception details never reach a client, and logs are JSON with
 credentials redacted before any handler sees them.
 
 Two mechanical gates hold the contract to that: a string property with no
-`maxLength` and a `2xx` body that is not a `BaseResponse` subclass both fail the
+`maxLength` and a `2xx` body that is not a `BaseResponse` both fail the
 suite.
 
 ## Media
@@ -298,21 +307,20 @@ src/ecom_be/
 │   ├── identity.py             # request and response models
 │   └── health.py
 ├── repositories/               # database operations, one module per owning model
-│   ├── user.py                 # statements against users
-│   ├── shop.py                 # statements against shops
-│   ├── role.py                 # roles and permissions (read-only lookups)
-│   ├── membership.py           # memberships + the permission resolution
-│   └── refresh_token.py        # refresh token lifecycle
-├── services/                   # use cases
-│   ├── identity/               # one module per seam, composed by IdentityService
-│   │   ├── __init__.py         # the composite facade
-│   │   ├── auth.py             # register, login, refresh, logout, switch-shop
-│   │   ├── account.py          # the caller's own profile, avatar, deactivation
-│   │   ├── shop.py             # the active shop's profile and retirement
-│   │   └── session.py          # the Session result and issue_session
-│   ├── rate_limit.py           # cross-feature Redis limiter
-│   ├── media.py
-│   └── health.py
+│   ├── user_repository.py      # statements against users
+│   ├── shop_repository.py      # statements against shops
+│   ├── role_repository.py      # roles and permissions (read-only lookups)
+│   ├── membership_repository.py# memberships + the permission resolution
+│   └── refresh_token_repository.py  # refresh token lifecycle
+├── services/                   # use cases, one module per service
+│   ├── identity_service.py     # the composite facade over the three seams
+│   ├── auth_service.py         # register, login, refresh, logout, switch-shop
+│   ├── account_service.py      # the caller's own profile, avatar, deactivation
+│   ├── shop_service.py         # the active shop's profile and retirement
+│   ├── session_service.py      # the Session result and issue_session
+│   ├── rate_limit_service.py   # cross-feature Redis limiter
+│   ├── media_service.py
+│   └── health_service.py
 ├── errors/                     # domain errors, one module per feature
 │   ├── identity.py
 │   └── media.py
@@ -340,27 +348,31 @@ src/ecom_be/
 ```
 
 A layer file exists only when the feature has something to put in it, and a layer
-that outgrows one file becomes a package of them: `services/identity/` is split by
-use-case seam, and `repositories/` is one module per owning model. `media` and
-`health` persist nothing, so they contribute no model, no repository, and no
-constants.
+that outgrows one file splits per owning model in `repositories/` or per use-case
+seam in `services/`. `media` and `health` persist nothing, so they contribute no
+model, no repository, and no constants.
+
+The envelope lives in `schemas/common.py` as `BaseResponse`, and the router layer
+applies it directly as `response_model=BaseResponse[YourData]`. There is no
+per-endpoint envelope subclass: one class carries `status_code`, `message`, and
+`data` for every successful response.
 
 ### Layer rules
 
 - **Routes never perform persistence.** A router in `api/v1/` declares the HTTP
   contract, resolves dependencies, and delegates. No SQLAlchemy session is
   touched and no query is built in a route.
-- **Services own use cases.** A `services/<feature>.py` holds the business
+- **Services own use cases.** A `services/<name>_service.py` holds the business
   decision — which repository calls happen, in what order, and what the outcome
   means. It is async and takes its collaborators through its constructor, so it
   can be tested with fakes and without a database. A feature whose use cases span
-  several aggregates grows a `services/<feature>/` package with one module per
-  seam plus a composite facade that keeps a single entry point.
-- **Repositories own database operations.** `repositories/<model>.py` is the only
-  place that executes statements or builds queries against the session, one module
-  per owning model rather than per feature, so a table's statements have exactly
-  one home. Repositories take a session and never commit on their own; the
-  transaction boundary belongs to the service.
+  several aggregates gets one module per seam and a composite service whose class
+  is the single entry point.
+- **Repositories own database operations.** `repositories/<model>_repository.py`
+  is the only place that executes statements or builds queries against the
+  session, one module per owning model rather than per feature, so a table's
+  statements have exactly one home. Repositories take a session and never commit
+  on their own; the transaction boundary belongs to the service.
 - **`utils/<feature>.py` stays pure.** Deterministic helpers only: no I/O, no
   session, no `httpx`/`redis` client, no request object.
 - **All I/O is async.** Database access uses `AsyncSession`, Redis uses
@@ -372,9 +384,9 @@ constants.
 ### Wiring a new feature
 
 1. Add the layer files the feature needs: `models/<feature>.py`,
-   `repositories/<model>.py` (one per owning model), `services/<feature>.py`,
-   `errors/<feature>.py`, `constants/<feature>.py`, `utils/<feature>.py`,
-   `schemas/<feature>.py`, and a router under `api/v1/`.
+   `repositories/<model>_repository.py` (one per owning model),
+   `services/<name>_service.py`, `errors/<feature>.py`, `constants/<feature>.py`,
+   `utils/<feature>.py`, `schemas/<feature>.py`, and a router under `api/v1/`.
 2. Register the router in `src/ecom_be/api/v1/__init__.py` with
    `api_router.include_router(...)`; that file only composes routers and adds no
    behavior of its own.

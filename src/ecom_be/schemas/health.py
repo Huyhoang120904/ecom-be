@@ -2,8 +2,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from ecom_be.schemas.common import BaseResponse
-
 DependencyName = Literal["database", "redis"]
 DependencyStatus = Literal["ok", "unavailable"]
 ReadinessStatus = Literal["ok", "not_ready"]
@@ -22,9 +20,3 @@ class LivenessResponse(BaseModel):
 class ReadinessResponse(BaseModel):
     status: ReadinessStatus
     dependencies: dict[DependencyName, DependencyStatus]
-
-
-class LivenessEnvelope(BaseResponse[LivenessResponse]): ...
-
-
-class ReadinessEnvelope(BaseResponse[ReadinessResponse]): ...

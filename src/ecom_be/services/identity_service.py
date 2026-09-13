@@ -17,10 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ecom_be.config.settings import Settings, get_settings
 from ecom_be.models.identity import Role, Shop, User
-from ecom_be.services.identity.account import AccountService
-from ecom_be.services.identity.auth import AuthService
-from ecom_be.services.identity.session import Session
-from ecom_be.services.identity.shop import ShopService
+from ecom_be.services.account_service import AccountService
+from ecom_be.services.auth_service import AuthService
+from ecom_be.services.session_service import Session
+from ecom_be.services.shop_service import ShopService
 
 __all__ = [
     "AccountService",

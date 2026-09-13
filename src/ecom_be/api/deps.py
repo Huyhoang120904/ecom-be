@@ -16,9 +16,7 @@ from ecom_be.errors.identity import (
     ShopNotAccessible,
 )
 from ecom_be.infrastructure.db import session as db_session
-from ecom_be.repositories import membership as membership_repository
-from ecom_be.repositories import shop as shop_repository
-from ecom_be.repositories import user as user_repository
+from ecom_be.repositories import membership_repository, shop_repository, user_repository
 from ecom_be.utils import identity as utils
 
 get_db_session = db_session.get_db_session

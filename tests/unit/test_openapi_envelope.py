@@ -8,6 +8,14 @@ This gate reads the published OpenAPI document. A ``204`` has no body and is
 exempt. Errors are deliberately not enveloped: they keep the ``{"error",
 "message"}`` shape, and ``error`` being present is the discriminator, so
 non-2xx responses are exempt here.
+
+How the envelope is identified: the routers declare
+``response_model=BaseResponse[Thing]``, so FastAPI publishes the schema name
+``BaseResponse_Thing_`` (the type variable's name is part of the generated name).
+This gate accepts that generated shape. The earlier per-endpoint ``XEnvelope``
+subclasses existed only to avoid those generated names; the trade is one envelope
+applied everywhere against a bespoke class per endpoint, and the router layer is what
+owns the envelope now.
 """
 
 from __future__ import annotations
@@ -19,7 +27,11 @@ import pytest
 from ecom_be.main import app
 
 METHODS = ("get", "post", "put", "patch", "delete", "head", "options")
-ENVELOPE_SUFFIX = "Envelope"
+
+# The envelope is `BaseResponse`, and a parametrised use of it publishes a schema
+# named `BaseResponse_<TypeArg>_`. A concrete subclass would be named after itself.
+ENVELOPE_PREFIX = "BaseResponse"
+ENVELOPE_SUFFIX = "Response"
 
 # These responses carry a binary body, not JSON, so there is nothing to wrap. They
 # are listed by path rather than matched by a rule, because "this endpoint streams
@@ -35,6 +47,12 @@ BINARY_PATHS = frozenset(
 @pytest.fixture(scope="module")
 def document() -> dict[str, Any]:
     return app.openapi()
+
+
+def _is_envelope_schema_name(name: str) -> bool:
+    """True for the envelope itself and for every parametrisation of it."""
+
+    return name == ENVELOPE_PREFIX or name.startswith(f"{ENVELOPE_PREFIX}_")
 
 
 def _bodyful_2xx_responses(document: dict[str, Any]) -> list[tuple[str, str, Any]]:
@@ -77,14 +95,33 @@ def test_every_2xx_json_response_is_enveloped(document):
             )
             continue
         name = schema["$ref"].rsplit("/", 1)[-1]
-        if not name.endswith(ENVELOPE_SUFFIX):
-            offenders.append(f"{route} {status_code}: {name} is not an envelope")
+        if not _is_envelope_schema_name(name):
+            offenders.append(f"{route} {status_code}: {name} is not a BaseResponse")
 
     assert offenders == [], (
-        "These 2xx responses are not wrapped in a BaseResponse subclass: "
-        f"{offenders}. Declare a concrete subclass (for example class "
-        "SessionEnvelope(BaseResponse[SessionData])) and set it as response_model."
+        "These 2xx responses are not wrapped in BaseResponse: "
+        f"{offenders}. Declare response_model=BaseResponse[YourData] on the route."
     )
+
+
+def test_the_envelope_carries_status_code_message_and_data(document):
+    """The envelope's own shape is part of the contract, so pin it."""
+
+    schemas = document["components"]["schemas"]
+    envelope_names = [name for name in schemas if _is_envelope_schema_name(name)]
+    assert envelope_names, "the document publishes no BaseResponse schema"
+
+    for name in envelope_names:
+        properties = schemas[name].get("properties", {})
+        assert set(properties) == {"status_code", "message", "data"}, (
+            f"{name} declares {sorted(properties)}, expected status_code, message, data"
+        )
+        assert properties["status_code"].get("type") == "integer", (
+            f"{name}.status_code must be an integer"
+        )
+        assert properties["message"].get("maxLength") is not None, (
+            f"{name}.message must carry a maxLength so it is a bounded string"
+        )
 
 
 def test_the_gate_would_catch_an_unenveloped_response(document):
@@ -117,7 +154,7 @@ def test_the_gate_would_catch_an_unenveloped_response(document):
         )
     ]
     name = found[0][2]["$ref"].rsplit("/", 1)[-1]
-    assert not name.endswith(ENVELOPE_SUFFIX), (
+    assert not _is_envelope_schema_name(name), (
         "a bare payload must not satisfy the gate"
     )
 

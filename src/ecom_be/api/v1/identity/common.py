@@ -4,14 +4,20 @@ Every route module in this package builds its payloads through these mappers, so
 a response shape is defined once. Cookie handling is here for the same reason:
 ``SameSite``, ``Path``, and ``Secure`` belong in one place rather than threaded
 through a use case that would then need to know about HTTP.
+
+The ``*_response`` builders wrap a payload in ``BaseResponse`` and take the status
+code explicitly, so the body always echoes the code the route actually returned
+(``201`` for registration, and the readiness route's ``503``) rather than a default
+that happens to match most of them.
 """
 
 from __future__ import annotations
 
-from fastapi import Request, Response
+from fastapi import Request, Response, status
 
 from ecom_be.api.media_urls import avatar_url, background_url
 from ecom_be.models.identity import Role, Shop, User
+from ecom_be.schemas.common import BaseResponse
 from ecom_be.schemas.identity import (
     MeData,
     MembershipData,
@@ -20,7 +26,7 @@ from ecom_be.schemas.identity import (
     ShopData,
     UserData,
 )
-from ecom_be.services.identity import Session
+from ecom_be.services.identity_service import Session
 
 REFRESH_COOKIE = "ecom_refresh"
 
@@ -127,3 +133,17 @@ def _me_data(
         memberships=_membership_data(memberships, request),
         permissions=permissions,
     )
+
+
+def session_response(data: SessionData) -> BaseResponse[SessionData]:
+    """Envelop a sign-in payload. Registration is the reason the code is explicit."""
+
+    return BaseResponse[SessionData](status_code=status.HTTP_201_CREATED, data=data)
+
+
+def me_response(data: MeData) -> BaseResponse[MeData]:
+    return BaseResponse[MeData](status_code=status.HTTP_200_OK, data=data)
+
+
+def shop_response(data: ShopData) -> BaseResponse[ShopData]:
+    return BaseResponse[ShopData](status_code=status.HTTP_200_OK, data=data)

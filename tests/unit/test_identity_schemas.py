@@ -1,8 +1,10 @@
-"""Contract: identity request bounds and response envelopes.
+"""Contract: identity request bounds and the response payload models.
 
 The request assertions are about normalization and bounds, because those are the
 rules the OpenAPI document promises to a generated client. The response assertions
-are about what must *not* be exposed.
+are about what must *not* be exposed. The envelope that wraps these payloads is
+``schemas/common.py``'s ``BaseResponse``, and its own shape is pinned by
+``tests/unit/test_openapi_envelope.py`` against the published document.
 """
 
 from __future__ import annotations
@@ -14,11 +16,11 @@ from ecom_be.schemas.identity import (
     DeactivateRequest,
     DeleteShopRequest,
     LoginRequest,
-    MeEnvelope,
+    MeData,
     ProfileUpdateRequest,
     RegisterRequest,
-    SessionEnvelope,
-    ShopEnvelope,
+    SessionData,
+    ShopData,
     ShopUpdateRequest,
     SwitchShopRequest,
 )
@@ -199,17 +201,20 @@ class TestSmallRequests:
             DeleteShopRequest.model_validate({})
 
 
-class TestResponseEnvelopes:
-    @pytest.mark.parametrize("envelope", [SessionEnvelope, MeEnvelope, ShopEnvelope])
-    def test_wraps_its_payload_in_a_data_field(self, envelope):
-        assert "data" in envelope.model_json_schema()["properties"]
+class TestResponsePayloads:
+    @pytest.mark.parametrize("payload", [SessionData, MeData, ShopData])
+    def test_is_a_plain_pydantic_model(self, payload):
+        """The envelope is not part of the payload, so the payload has no `data`."""
+
+        properties = payload.model_json_schema()["properties"]
+
+        assert "data" not in properties
+        assert "status_code" not in properties
 
     def test_the_session_body_carries_no_refresh_token(self):
         """The refresh token travels only as an httpOnly cookie."""
 
-        properties = SessionEnvelope.model_json_schema()["$defs"]["SessionData"][
-            "properties"
-        ]
+        properties = SessionData.model_json_schema()["properties"]
 
         assert "refresh_token" not in properties
         assert "access_token" in properties
@@ -217,7 +222,7 @@ class TestResponseEnvelopes:
     def test_no_response_exposes_a_media_object_key(self):
         """The client receives a derived URL, never the storage layout."""
 
-        serialized = str(SessionEnvelope.model_json_schema())
+        serialized = str(SessionData.model_json_schema())
 
         assert "avatar_key" not in serialized
         assert "background_key" not in serialized
@@ -225,4 +230,4 @@ class TestResponseEnvelopes:
         assert "background_url" in serialized
 
     def test_no_response_exposes_a_password_hash(self):
-        assert "password_hash" not in str(SessionEnvelope.model_json_schema())
+        assert "password_hash" not in str(SessionData.model_json_schema())
