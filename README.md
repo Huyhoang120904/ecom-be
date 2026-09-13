@@ -26,7 +26,8 @@ the published ports `55432` (PostgreSQL) and `56379` (Redis) that
 `compose.yaml` defaults to. Build the URLs from those parts rather than
 committing a ready-made connection string.
 
-`.env` holds **only** the five keys `.env.example` lists. `Settings` requires
+`.env` holds **only** the keys `.env.example` lists (see
+[Configuration](#configuration)). `Settings` requires
 `DATABASE_URL` and `REDIS_URL` and rejects unknown keys, so a stale `.env` fails
 fast at import time instead of at the first query. Compose variables such as
 `POSTGRES_PORT` belong in `compose.env`, never in `.env` — see
@@ -107,9 +108,10 @@ startup and application startup stay independent.
 | Check formatting (CI gate) | `uv run ruff format --check .` |
 | Lint | `uv run ruff check .` |
 | Lint and auto-fix | `uv run ruff check --fix .` |
-| Type-check | `uv run mypy src` |
+| Type-check | `uv run mypy src alembic` |
 | Run the whole suite | `uv run pytest -q` |
 | Run one test file | `uv run pytest -q tests/unit/test_config.py` |
+| Run the database suite | `uv run pytest -q -m db` (needs `docker compose up -d --wait`) |
 | Verify the lockfile | `uv lock --check` |
 | Apply migrations | `uv run alembic upgrade head` |
 | Show the current revision | `uv run alembic current` |
@@ -118,7 +120,24 @@ startup and application startup stay independent.
 
 Formatting, linting, and type-check rules live in `pyproject.toml`
 (`[tool.ruff]`, `[tool.mypy]`, `[tool.pytest.ini_options]`) and are the same
-rules CI runs. `uv run pytest -q` passes without any Docker service running.
+rules CI runs.
+
+### Two test runs
+
+`uv run pytest -q` passes with no Docker service running. Tests that assert real
+PostgreSQL behaviour — `citext`, the partial unique indexes, the `CHECK`
+constraints — are marked `db`, and `addopts` excludes them by default so that
+stays true. Run them explicitly against the compose database:
+
+```bash
+docker compose up -d --wait
+uv run alembic upgrade head
+uv run pytest -q -m db
+```
+
+Writing those assertions against SQLite would prove nothing: SQLite has no
+`citext`, no partial-index semantics worth trusting, and no `gen_random_uuid`.
+
 
 ## Database migrations
 
@@ -140,16 +159,23 @@ models, and exports the resulting `metadata` object, which is what
 `alembic/env.py` assigns to `target_metadata`. A model class that is not
 imported there is invisible to autogenerate.
 
-The scaffold has an empty migration history on purpose: the health module has
-no ORM business model, and inventing a table just to make the history look
-populated would be fake data. Adding the first persisted module means:
+The scaffold ships two revisions: an identity schema (accounts, shops, roles,
+permissions, memberships, refresh tokens) and a seed that installs the permission
+vocabulary and the three system roles. Adding a persisted module means:
 
 1. Write `modules/<module_name>/models.py`, declaring the model on
-   `ecom_be.infrastructure.db.base.Base`.
+   `ecom_be.infrastructure.db.base.Base` and taking the mixins from
+   `ecom_be.infrastructure.db.mixins` for the id and timestamp columns.
 2. Import that model class in `src/ecom_be/infrastructure/db/models.py` and add
    its name to that file's `__all__`.
-3. `uv run alembic revision --autogenerate -m "<change>"`, then
-   `uv run alembic upgrade head`.
+3. `uv run alembic revision --autogenerate -m "<change>"`, then **review the
+   file by hand**, then `uv run alembic upgrade head`.
+
+Autogenerate does emit `CHECK` constraints, which is convenient and easy to
+assume wrongly in either direction — it does *not* emit `CREATE EXTENSION`, and
+it cannot infer a partial index predicate you did not express in the model. The
+identity revision therefore carries a hand-added `CREATE EXTENSION IF NOT EXISTS
+citext` and hand-reviewed constraints.
 
 `tests/unit/test_migration_metadata.py` fails if a module ships a `models.py`
 that the aggregation point does not import, so this step cannot be forgotten
@@ -173,15 +199,77 @@ called out in the commit message.
 
 ## Endpoints
 
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /health/live` | I/O-free liveness; answers as long as the process is up |
-| `GET /health/ready` | Readiness; probes PostgreSQL and Redis, `200` when both are `ok`, `503` with `{"status": "not_ready"}` otherwise |
-| `GET /api/v1/openapi.json` | Generated OpenAPI document |
+Health is public so a probe needs no credential. The two media `GET`s are public
+because an avatar and a shop background are shareable-by-intent images. Every
+other route requires a bearer token.
 
-Errors are returned as `{"error": "<stable_code>", "message": "<safe text>"}`.
-Internal exception details never reach a client, and logs are JSON with
+| Endpoint | Auth | Purpose |
+| --- | --- | --- |
+| `GET /health/live` | public | I/O-free liveness; answers as long as the process is up |
+| `GET /health/ready` | public | Readiness; probes PostgreSQL and Redis, `200` when both are `ok`, `503` with the same envelope otherwise |
+| `GET /api/v1/openapi.json` | public | Generated OpenAPI document |
+| `POST /api/v1/auth/register` | public | Create an account and its first shop, then sign in |
+| `POST /api/v1/auth/login` | public | Start a session |
+| `POST /api/v1/auth/refresh` | cookie | Rotate the refresh cookie and issue a new access token |
+| `POST /api/v1/auth/logout` | cookie | End the session. Always `204` |
+| `POST /api/v1/auth/switch-shop` | bearer | Move the session to another shop the caller belongs to |
+| `GET /api/v1/auth/me` | bearer | The caller, their memberships, the active shop, effective permissions |
+| `PATCH /api/v1/auth/me` | bearer | Update the caller's own profile; omitted keys are left alone |
+| `POST /api/v1/auth/me/avatar` | bearer | Replace the avatar (`multipart/form-data`) |
+| `DELETE /api/v1/auth/me/avatar` | bearer | Remove the avatar. Idempotent |
+| `POST /api/v1/auth/deactivate` | bearer | Retire the account, confirmed by password. One-way |
+| `PATCH /api/v1/shops/active` | `shop:update` | Update the active shop's profile |
+| `POST /api/v1/shops/active/background` | `shop:update` | Replace the shop background |
+| `DELETE /api/v1/shops/active/background` | `shop:update` | Remove the shop background. Idempotent |
+| `DELETE /api/v1/shops/active` | `shop:update` | Retire the shop, confirmed by its exact name |
+| `GET /api/v1/media/avatar/{user_id}.webp` | public | Serve an avatar |
+| `GET /api/v1/media/shop-background/{shop_id}.webp` | public | Serve a shop background |
+
+Every `2xx` response with a body is wrapped: `{"data": {...}}`. Errors are never
+wrapped, and keep the `{"error": "<stable_code>", "message": "<safe text>"}`
+shape. Internal exception details never reach a client, and logs are JSON with
 credentials redacted before any handler sees them.
+
+Two mechanical gates hold the contract to that: a string property with no
+`maxLength` and a `2xx` body that is not a `BaseResponse` subclass both fail the
+suite.
+
+## Media
+
+An avatar is normalized to a 512 x 512 WebP and a shop background to 1600 x 900,
+centre-cropped, with the EXIF block dropped. Dropping EXIF is not cosmetic: a
+phone photo carries GPS coordinates, and serving a seller's home location from a
+public endpoint is a privacy leak.
+
+Objects are keyed by a content digest, so a byte-identical re-upload is a no-op
+rather than a duplicate, and the URL is versioned by that digest so a replaced
+image is never served from a cache.
+
+Storage is a local directory (`MEDIA_ROOT`, default `.media/`, gitignored) behind
+the `StorageBackend` protocol in `modules/media/storage.py`. That protocol is the
+single swap point for object storage. **Mount `MEDIA_ROOT` as a volume**: a local
+directory inside a container does not survive a redeploy.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `MEDIA_ROOT` | `.media` | Where objects are written |
+| `MEDIA_BASE_URL` | empty | The origin used in returned URLs. Empty means "use the request's own origin" |
+| `MAX_UPLOAD_BYTES` | `2097152` (2 MiB) | The upload cap, enforced before any decode |
+
+## Configuration
+
+`.env` holds exactly these keys; `Settings` rejects anything else.
+
+| Key | Required | Default | Meaning |
+| --- | --- | --- | --- |
+| `APP_NAME` | no | `ecom-be` | Reported by `/health/live` |
+| `ENVIRONMENT` | no | `development` | `development` relaxes the refresh cookie's `Secure` flag |
+| `DATABASE_URL` | yes | — | Async PostgreSQL DSN (`postgresql+asyncpg`) |
+| `REDIS_URL` | yes | — | Redis DSN |
+| `CORS_ORIGINS` | no | `()` | JSON array of explicit origins; `*` is refused |
+| `JWT_SECRET` | yes | — | Access-token signing secret, at least 32 characters |
+| `ACCESS_TOKEN_TTL_SECONDS` | no | `900` | Access-token lifetime |
+| `REFRESH_TOKEN_TTL_SECONDS` | no | `2592000` | Refresh-token lifetime (30 days) |
 
 ## Module template
 
@@ -190,21 +278,23 @@ exactly these files:
 
 ```
 src/ecom_be/modules/<module_name>/
-├── __init__.py         # one-line module docstring
+├── __init__.py         # intentional public exports
 ├── models.py           # SQLAlchemy ORM models on the shared Base
+├── errors.py           # domain errors: code and status_code on the class
+├── constants.py        # every bound the contract declares
 ├── schemas/
 │   ├── __init__.py
 │   ├── request.py      # incoming payload models
-│   └── response.py     # outgoing payload models
+│   └── response.py     # outgoing payload models, plus the envelopes
 ├── utils.py            # pure helpers: no I/O, no framework imports
 ├── repository.py       # all database operations for this module
 ├── services.py         # use cases; orchestrates repositories and clients
 └── router.py           # HTTP routes; calls services through dependencies
 ```
 
-`models.py` may be omitted while a module has no persisted entity — the health
-module is the example — but the other files are part of the template and a new
-module that needs persistence adds `models.py`, not a new schema strategy.
+`models.py` and `repository.py` may be omitted while a module has no persisted
+entity — `modules/health/` and `modules/media/` are those cases — but a module
+that persists anything adds them rather than inventing another shape.
 
 ### Layer rules
 
@@ -246,15 +336,17 @@ module that needs persistence adds `models.py`, not a new schema strategy.
 
 `.github/workflows/ci.yml` runs three jobs on GitHub Actions:
 
-- `quality` — `ruff format --check .`, `ruff check .`, `mypy src`, `uv lock --check`
-- `tests` — `uv run pytest -q`, with no external services started
+- `quality` — `ruff format --check .`, `ruff check .`, `mypy src alembic`, `uv lock --check`
+- `tests` — `uv run pytest -q`, with no external services started (the `db`-marked
+  tests are deselected by `addopts`, so this job needs no database)
 - `readiness` — starts PostgreSQL 16 and Redis 7 service containers, applies
   `alembic upgrade head`, boots the app, polls `/health/ready` until it is
-  healthy, and verifies `/health/live` plus the OpenAPI document lists
-  `/health/live` and `/health/ready`
+  healthy, and verifies `/health/live` plus the OpenAPI document
 
 The `readiness` job is the only job that starts datastores, which keeps the
-committed test suite runnable on a machine with no Docker.
+committed test suite runnable on a machine with no Docker. It is also where
+`uv run pytest -q -m db` belongs: the `db` suite needs the same migrated database
+this job already builds.
 
 ## Contributing
 
