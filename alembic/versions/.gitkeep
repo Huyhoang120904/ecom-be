@@ -1,0 +1,4 @@
+# Migration revisions live in this directory.
+#
+# The health module has no ORM business model, so the initial history is empty
+# by design. `alembic revision --autogenerate` writes new revisions here.

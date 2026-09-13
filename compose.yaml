@@ -1,0 +1,56 @@
+# Local development dependencies for ecom-be.
+#
+# The credentials below are disposable local-development values. They are
+# deliberately obvious and must never be reused outside a throwaway developer
+# machine: nothing here is a production credential, and no real secret belongs
+# in this file.
+#
+# This file starts ONLY the local PostgreSQL and Redis dependencies so the test
+# suite keeps running without Docker. The application itself is defined in
+# `Dockerfile` and is meant to run either directly through `uv run uvicorn`
+# (see README.md) or as a container started separately from these services.
+#
+# Host ports are overridable so a machine already using 5432/6379 for another
+# project can still start these services; the application reaches them through
+# DATABASE_URL and REDIS_URL in the untracked `.env` file.
+
+name: ecom-be
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ecommerce}
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      # Disposable local-only default; override POSTGRES_PASSWORD if you must.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+    ports:
+      - "${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-ecommerce} -h 127.0.0.1
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-56379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 3s
+
+volumes:
+  postgres-data:
+  redis-data:

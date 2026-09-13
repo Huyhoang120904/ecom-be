@@ -1,0 +1,189 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to the same ref cancels the previous run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_VERSION: "0.12.5"
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  quality:
+    name: Format, lint, type-check, lock
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Sync locked dependencies
+        run: uv sync --locked
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Type-check
+        run: uv run mypy src
+
+      - name: Verify the lockfile is current
+        run: uv lock --check
+
+  tests:
+    name: Test suite (no external services)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Sync locked dependencies
+        run: uv sync --locked
+
+      # The committed suite stubs its dependency probes, so it needs neither
+      # PostgreSQL nor Redis. Live-service coverage lives in `readiness`.
+      - name: Run tests
+        run: uv run pytest -q
+
+  readiness:
+    name: Migrations and live readiness
+    runs-on: ubuntu-latest
+
+    # Disposable, CI-only service credentials. They exist so these throwaway
+    # containers can run for the duration of the job; they are not secrets and
+    # must never be reused or treated as production values. The connection
+    # URLs are assembled from these components below instead of being committed
+    # as literal DSNs.
+    env:
+      POSTGRES_DB: ecommerce
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      REDIS_HOST: localhost
+      REDIS_PORT: "6379"
+      CORS_ORIGINS: '["http://localhost:3000"]'
+
+    # PostgreSQL and Redis start here, and only here: this is the job that
+    # exercises the application against real services.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ecommerce
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U app -d ecommerce"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Sync locked dependencies
+        run: uv sync --locked
+
+      - name: Assemble the application URLs
+        run: |
+          echo "DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" >> "$GITHUB_ENV"
+          echo "REDIS_URL=redis://${REDIS_HOST}:${REDIS_PORT}/0" >> "$GITHUB_ENV"
+
+      - name: Apply migrations
+        run: uv run alembic upgrade head
+
+      - name: Confirm the migration history is current
+        run: uv run alembic current
+
+      - name: Start the application
+        run: |
+          uv run uvicorn ecom_be.main:app --host 127.0.0.1 --port 8000 \
+            > /tmp/ecom-be.log 2>&1 &
+          echo "$!" > /tmp/ecom-be.pid
+
+      - name: Wait for readiness
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail http://127.0.0.1:8000/health/ready; then
+              echo
+              echo "readiness ok after ${attempt} attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "readiness did not become healthy"
+          cat /tmp/ecom-be.log
+          exit 1
+
+      - name: Check liveness and the OpenAPI contract
+        run: |
+          curl --silent --fail http://127.0.0.1:8000/health/live
+          echo
+          curl --silent --fail http://127.0.0.1:8000/api/v1/openapi.json \
+            > /tmp/ecom-be-openapi.json
+          python - <<'PY'
+          import json
+
+          with open("/tmp/ecom-be-openapi.json", encoding="utf-8") as handle:
+              paths = json.load(handle)["paths"]
+
+          for route in ("/health/live", "/health/ready"):
+              assert route in paths, f"missing route: {route}"
+          print("OpenAPI paths verified:", sorted(paths))
+          PY
+
+      - name: Stop the application
+        if: always()
+        run: |
+          if [ -f /tmp/ecom-be.pid ]; then
+            kill "$(cat /tmp/ecom-be.pid)" || true
+          fi
+
+      - name: Show application log
+        if: always()
+        run: cat /tmp/ecom-be.log || true

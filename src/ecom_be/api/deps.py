@@ -26,7 +26,7 @@ async def get_application_db_session(request: Request) -> AsyncIterator[AsyncSes
 async def get_redis_client(request: Request) -> Redis:
     """Return the Redis client owned by the application lifecycle."""
 
-    client = getattr(request.app.state, "redis_client", None)
+    client: Redis | None = getattr(request.app.state, "redis_client", None)
     if client is None:
         client = getattr(request.app.state, "redis", None)
     if client is None:
