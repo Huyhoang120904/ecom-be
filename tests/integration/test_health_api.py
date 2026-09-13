@@ -30,7 +30,7 @@ async def test_request_validation_uses_safe_stable_error_response():
     from fastapi import Query
     from httpx import ASGITransport, AsyncClient
 
-    from ecom_be.main import create_app
+    from app.main import create_app
 
     application = create_app()
 
@@ -54,7 +54,7 @@ async def test_http_exception_uses_stable_code_and_safe_message():
     from fastapi import HTTPException
     from httpx import ASGITransport, AsyncClient
 
-    from ecom_be.main import create_app
+    from app.main import create_app
 
     application = create_app()
 
@@ -74,7 +74,7 @@ async def test_http_exception_uses_stable_code_and_safe_message():
 async def test_unhandled_exception_uses_generic_stable_error_response():
     from httpx import ASGITransport, AsyncClient
 
-    from ecom_be.main import create_app
+    from app.main import create_app
 
     application = create_app()
 
@@ -95,7 +95,7 @@ async def test_unhandled_exception_uses_generic_stable_error_response():
 
 
 def test_structured_logging_redacts_sensitive_values():
-    from ecom_be.core.logging import StructuredJsonFormatter
+    from app.core.logging import StructuredJsonFormatter
 
     secrets = {
         "authorization": "auth-secret",
@@ -136,7 +136,7 @@ def test_structured_logging_redacts_sensitive_values():
 
 
 def test_redacting_filter_handles_sensitive_format_arguments():
-    from ecom_be.core.logging import RedactingFilter, StructuredJsonFormatter
+    from app.core.logging import RedactingFilter, StructuredJsonFormatter
 
     record = logging.LogRecord(
         name="test.logger",
@@ -163,7 +163,7 @@ def test_redacting_filter_handles_sensitive_format_arguments():
 
 
 def test_redacting_filter_handles_generic_credential_url():
-    from ecom_be.core.logging import RedactingFilter, StructuredJsonFormatter
+    from app.core.logging import RedactingFilter, StructuredJsonFormatter
 
     credential_url = "db:" + "//user:" + "connection-secret@db.example/resource"
     record = logging.LogRecord(
@@ -183,8 +183,8 @@ def test_redacting_filter_handles_generic_credential_url():
 
 
 def test_create_app_configures_json_logging():
-    from ecom_be.core.logging import StructuredJsonFormatter
-    from ecom_be.main import create_app
+    from app.core.logging import StructuredJsonFormatter
+    from app.main import create_app
 
     create_app()
 
@@ -199,7 +199,7 @@ async def test_http_exception_preserves_response_headers():
     from fastapi import HTTPException
     from httpx import ASGITransport, AsyncClient
 
-    from ecom_be.main import create_app
+    from app.main import create_app
 
     application = create_app()
 
@@ -239,7 +239,7 @@ async def test_http_exception_preserves_response_headers():
 
 
 def test_redaction_covers_quoted_json_and_container_reprs():
-    from ecom_be.core.logging import StructuredJsonFormatter, redact_sensitive_data
+    from app.core.logging import StructuredJsonFormatter, redact_sensitive_data
 
     payload_log = 'body={"username":"bob","password":"hunter2"}'
     quoted_json_log = '{"token": "abc123"}'
@@ -267,7 +267,7 @@ def test_redaction_covers_quoted_json_and_container_reprs():
 
 
 def test_configure_logging_redacts_uvicorn_loggers():
-    from ecom_be.core.logging import RedactingFilter, configure_logging
+    from app.core.logging import RedactingFilter, configure_logging
 
     configure_logging()
 
@@ -287,7 +287,7 @@ def test_configure_logging_redacts_uvicorn_loggers():
 
 
 def test_uvicorn_logger_records_are_redacted_with_traceback():
-    from ecom_be.core.logging import configure_logging
+    from app.core.logging import configure_logging
 
     configure_logging()
 
@@ -320,7 +320,7 @@ def test_uvicorn_logger_records_are_redacted_with_traceback():
 
 
 def test_exception_tracebacks_are_preserved_and_redacted():
-    from ecom_be.core.logging import RedactingFilter, StructuredJsonFormatter
+    from app.core.logging import RedactingFilter, StructuredJsonFormatter
 
     try:
         raise RuntimeError("connect failed password=hunter2")
@@ -350,8 +350,8 @@ async def test_cors_uses_validated_origin_and_allows_credentials():
     from httpx import ASGITransport, AsyncClient
     from pydantic import PostgresDsn, RedisDsn
 
-    from ecom_be.config.settings import Settings
-    from ecom_be.main import create_app
+    from app.config.settings import Settings
+    from app.main import create_app
 
     settings = Settings(
         database_url=PostgresDsn.build(

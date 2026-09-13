@@ -81,7 +81,7 @@ def _docker_compose_works() -> bool:
 
 
 def test_env_example_only_declares_keys_the_application_parses():
-    from ecom_be.config.settings import Settings
+    from app.config.settings import Settings
 
     declared = _declared_keys(ENV_EXAMPLE)
 
@@ -115,7 +115,7 @@ def test_settings_reject_a_compose_only_key_written_into_the_env_file(
     documented "uncomment this block in .env" edit breaks the app.
     """
 
-    from ecom_be.config.settings import Settings
+    from app.config.settings import Settings
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("POSTGRES_PORT", raising=False)

@@ -4,7 +4,7 @@
 
 - Target Python 3.11.x and manage dependencies with `uv`. Do not add a second
   dependency manager or hand-edit `uv.lock`.
-- Keep application code under `src/ecom_be` and tests under `tests`.
+- Keep application code under `app` and tests under `tests`.
 - Never commit `.env`, credentials, connection strings, or secret values —
   including passwords embedded in examples, tests, or docs. `.env.example`
   holds replaceable placeholders only.
@@ -26,7 +26,7 @@ Layered, not module-packaged: each feature contributes one file per layer it
 needs, and a change's layer is decided by what the change does.
 
 ```
-src/ecom_be/
+app/
 ├── main.py                     # app factory, lifespan, middleware wiring
 ├── config/settings.py          # the validated settings object
 ├── core/                       # cross-cutting: errors.py, logging.py
@@ -115,12 +115,12 @@ Errors are not enveloped: they keep `{"error", "message"}` from `core/errors.py`
 
 1. Add the layer files the feature needs, named for the feature, in each layer
    directory above — one repository module per owning model.
-2. Register the router from `src/ecom_be/api/v1/__init__.py`; that file only
+2. Register the router from `app/api/v1/__init__.py`; that file only
    composes routers.
 3. Take the request-scoped session and the lifecycle-owned Redis client from
    application state; do not build per-request clients.
 4. For persisted data: write `models/<feature>.py` on the shared `Base`, then
-   import the model class in `src/ecom_be/models/__init__.py` — the single
+   import the model class in `app/models/__init__.py` — the single
    aggregation point `alembic/env.py` uses as `target_metadata` — and add its
    name to that file's `__all__`. Then
    `uv run alembic revision --autogenerate -m "..."` and

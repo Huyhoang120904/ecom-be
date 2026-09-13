@@ -116,7 +116,7 @@ startup and application startup stay independent.
 | Apply migrations | `uv run alembic upgrade head` |
 | Show the current revision | `uv run alembic current` |
 | Create a migration | `uv run alembic revision --autogenerate -m "add order table"` |
-| Start the dev server | `uv run uvicorn ecom_be.main:app --reload --port 8000` |
+| Start the dev server | `uv run uvicorn app.main:app --reload --port 8000` |
 
 Formatting, linting, and type-check rules live in `pyproject.toml`
 (`[tool.ruff]`, `[tool.mypy]`, `[tool.pytest.ini_options]`) and are the same
@@ -151,7 +151,7 @@ Autogenerate compares the live database against a single named aggregation
 point:
 
 ```
-src/ecom_be/models/__init__.py
+app/models/__init__.py
 ```
 
 That module imports the shared declarative `Base` and every model module, and
@@ -163,10 +163,10 @@ The scaffold ships two revisions: an identity schema (accounts, shops, roles,
 permissions, memberships, refresh tokens) and a seed that installs the permission
 vocabulary and the three system roles. Adding a persisted feature means:
 
-1. Write `src/ecom_be/models/<feature>.py`, declaring the model on
-   `ecom_be.infrastructure.db.base.Base` and taking the mixins from
-   `ecom_be.infrastructure.db.mixins` for the id and timestamp columns.
-2. Import that model class in `src/ecom_be/models/__init__.py` and add its name
+1. Write `app/models/<feature>.py`, declaring the model on
+   `app.infrastructure.db.base.Base` and taking the mixins from
+   `app.infrastructure.db.mixins` for the id and timestamp columns.
+2. Import that model class in `app/models/__init__.py` and add its name
    to that file's `__all__`.
 3. `uv run alembic revision --autogenerate -m "<change>"`, then **review the
    file by hand**, then `uv run alembic upgrade head`.
@@ -178,7 +178,7 @@ identity revision therefore carries a hand-added `CREATE EXTENSION IF NOT EXISTS
 citext` and hand-reviewed constraints.
 
 `tests/unit/test_migration_metadata.py` fails if a model module in
-`ecom_be/models/` is not imported by the aggregation view, so this step cannot
+`app/models/` is not imported by the aggregation view, so this step cannot
 be forgotten silently.
 
 `alembic/versions/` is tracked through a `.gitkeep` so revisions have a home.
@@ -189,7 +189,7 @@ The OpenAPI document is served at `/api/v1/openapi.json` and is the single
 source of truth for clients. Frontends generate their types from it:
 
 ```bash
-uv run uvicorn ecom_be.main:app --host 127.0.0.1 --port 8000 &
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 &
 curl --fail http://127.0.0.1:8000/api/v1/openapi.json -o openapi.json
 ```
 
@@ -255,7 +255,7 @@ rather than a duplicate, and the URL is versioned by that digest so a replaced
 image is never served from a cache.
 
 Storage is a local directory (`MEDIA_ROOT`, default `.media/`, gitignored) behind
-the `StorageBackend` protocol in `src/ecom_be/infrastructure/storage/local.py`.
+the `StorageBackend` protocol in `app/infrastructure/storage/local.py`.
 That protocol is the single swap point for object storage. **Mount `MEDIA_ROOT`
 as a volume**: a local directory inside a container does not survive a redeploy.
 
@@ -287,7 +287,7 @@ file to each layer, and the layer a change belongs in is decided by what it does
 rather than by which feature it serves.
 
 ```
-src/ecom_be/
+app/
 ├── main.py                     # app factory, lifespan, middleware wiring
 ├── config/settings.py          # the validated settings object
 ├── core/                       # cross-cutting concerns: errors.py, logging.py
@@ -387,14 +387,14 @@ per-endpoint envelope subclass: one class carries `status_code`, `message`, and
    `repositories/<model>_repository.py` (one per owning model),
    `services/<name>_service.py`, `errors/<feature>.py`, `constants/<feature>.py`,
    `utils/<feature>.py`, `schemas/<feature>.py`, and a router under `api/v1/`.
-2. Register the router in `src/ecom_be/api/v1/__init__.py` with
+2. Register the router in `app/api/v1/__init__.py` with
    `api_router.include_router(...)`; that file only composes routers and adds no
    behavior of its own.
-3. Reuse the request-scoped session from `ecom_be.infrastructure.db.session` and
+3. Reuse the request-scoped session from `app.infrastructure.db.session` and
    the lifecycle-owned Redis client from `app.state`; do not create clients per
    request.
 4. If the feature persists data, add `models/<feature>.py`, import the model
-   class in `src/ecom_be/models/__init__.py` (the Alembic metadata aggregation
+   class in `app/models/__init__.py` (the Alembic metadata aggregation
    point), and generate a migration.
 5. Add unit tests under `tests/unit/` and API tests under `tests/integration/`.
 

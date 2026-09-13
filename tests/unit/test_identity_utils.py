@@ -11,14 +11,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ecom_be.config.settings import get_settings
-from ecom_be.constants.identity import (
+from app.config.settings import get_settings
+from app.constants.identity import (
     PASSWORD_MAX,
     PASSWORD_MAX_BYTES,
     PHONE_MAX_INPUT,
     SLUG_MAX,
 )
-from ecom_be.utils import identity as utils
+from app.utils import identity as utils
 
 
 class TestNormalizeEmail:

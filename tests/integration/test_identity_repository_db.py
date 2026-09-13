@@ -11,14 +11,14 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ecom_be.repositories import (
+from app.repositories import (
     membership_repository,
     refresh_token_repository,
     role_repository,
     shop_repository,
     user_repository,
 )
-from ecom_be.utils.identity import hash_refresh_token
+from app.utils.identity import hash_refresh_token
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
 

@@ -23,7 +23,7 @@ from typing import Any
 
 import pytest
 
-from ecom_be.main import app
+from app.main import app
 
 # FastAPI generates these two to document its own ``RequestValidationError``
 # response. This application replaces that response body with the stable

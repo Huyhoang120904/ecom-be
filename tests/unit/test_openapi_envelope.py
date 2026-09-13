@@ -24,7 +24,7 @@ from typing import Any
 
 import pytest
 
-from ecom_be.main import app
+from app.main import app
 
 METHODS = ("get", "post", "put", "patch", "delete", "head", "options")
 

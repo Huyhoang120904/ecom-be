@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from ecom_be.infrastructure.storage.local import LocalStorageBackend
+from app.infrastructure.storage.local import LocalStorageBackend
 
 pytestmark = pytest.mark.anyio
 

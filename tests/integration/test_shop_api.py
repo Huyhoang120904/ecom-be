@@ -11,7 +11,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
 
-from ecom_be.repositories import membership_repository
+from app.repositories import membership_repository
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
 

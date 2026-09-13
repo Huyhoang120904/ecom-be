@@ -11,10 +11,10 @@ import pytest
 from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from ecom_be.api.deps import get_current_principal, require_permissions, require_roles
-from ecom_be.api.principal import Principal
-from ecom_be.core.errors import register_exception_handlers
-from ecom_be.errors.identity import (
+from app.api.deps import get_current_principal, require_permissions, require_roles
+from app.api.principal import Principal
+from app.core.errors import register_exception_handlers
+from app.errors.identity import (
     AccountInactive,
     Forbidden,
     InvalidToken,

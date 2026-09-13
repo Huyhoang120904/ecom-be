@@ -3,8 +3,8 @@ import pytest
 
 @pytest.mark.anyio
 async def test_readiness_endpoint_returns_ok_for_healthy_dependencies(async_client):
-    from ecom_be.api.deps import get_database_probe, get_redis_probe
-    from ecom_be.main import app
+    from app.api.deps import get_database_probe, get_redis_probe
+    from app.main import app
 
     async def database_probe():
         return True
@@ -32,8 +32,8 @@ async def test_readiness_endpoint_returns_ok_for_healthy_dependencies(async_clie
 
 @pytest.mark.anyio
 async def test_readiness_endpoint_returns_503_for_unavailable_dependency(async_client):
-    from ecom_be.api.deps import get_database_probe, get_redis_probe
-    from ecom_be.main import app
+    from app.api.deps import get_database_probe, get_redis_probe
+    from app.main import app
 
     async def database_probe():
         return True
@@ -66,8 +66,8 @@ async def test_readiness_endpoint_returns_503_for_unavailable_dependency(async_c
 async def test_readiness_endpoint_uses_the_probe_a_dependency_override_provides(
     async_client,
 ):
-    from ecom_be.api.deps import get_database_probe, get_redis_probe
-    from ecom_be.main import app
+    from app.api.deps import get_database_probe, get_redis_probe
+    from app.main import app
 
     async def database_probe():
         return True
@@ -100,8 +100,8 @@ async def test_an_override_that_yields_a_value_instead_of_a_probe_reports_unavai
     value cannot be called.
     """
 
-    from ecom_be.api.deps import get_database_probe, get_redis_probe
-    from ecom_be.main import app
+    from app.api.deps import get_database_probe, get_redis_probe
+    from app.main import app
 
     app.dependency_overrides[get_database_probe] = lambda: True
     app.dependency_overrides[get_redis_probe] = lambda: True

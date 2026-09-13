@@ -1,5 +1,5 @@
 def test_liveness_service_returns_healthy_payload():
-    from ecom_be.services.health_service import HealthService
+    from app.services.health_service import HealthService
 
     result = HealthService().liveness()
 

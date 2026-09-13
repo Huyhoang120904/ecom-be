@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from ecom_be.errors.identity import (
+from app.errors.identity import (
     AccountDeactivated,
     AccountInactive,
     ConfirmationMismatch,
@@ -19,14 +19,14 @@ from ecom_be.errors.identity import (
     NotAMember,
     ShopNotAccessible,
 )
-from ecom_be.repositories import (
+from app.repositories import (
     membership_repository,
     refresh_token_repository,
     role_repository,
     shop_repository,
     user_repository,
 )
-from ecom_be.services.identity_service import IdentityService
+from app.services.identity_service import IdentityService
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
 
@@ -90,8 +90,8 @@ class TestRegister:
         assert "second-shop" not in slugs
 
     async def test_the_access_token_identifies_the_new_shop(self, db_session):
-        from ecom_be.config.settings import get_settings
-        from ecom_be.utils.identity import decode_access_token
+        from app.config.settings import get_settings
+        from app.utils.identity import decode_access_token
 
         _service, session = await _register(db_session)
         claims = decode_access_token(get_settings(), session.access_token)
@@ -166,7 +166,7 @@ class TestRefreshRotation:
     async def test_the_old_token_still_resolves_its_family(self, db_session):
         """Rotation adds a row; it does not orphan the original."""
 
-        from ecom_be.utils.identity import hash_refresh_token
+        from app.utils.identity import hash_refresh_token
 
         _service, first = await _register(db_session)
         service = IdentityService(db_session)
@@ -194,7 +194,7 @@ class TestRefreshRotation:
             await service.refresh(rotated.refresh_token)
 
     async def test_reuse_leaves_no_unrevoked_row_in_the_family(self, db_session):
-        from ecom_be.utils.identity import hash_refresh_token
+        from app.utils.identity import hash_refresh_token
 
         _service, first = await _register(db_session)
         service = IdentityService(db_session)
@@ -229,7 +229,7 @@ class TestRefreshRotation:
     async def test_an_expired_token_is_refused(self, db_session):
         from datetime import UTC, datetime, timedelta
 
-        from ecom_be.utils.identity import hash_refresh_token, new_refresh_token
+        from app.utils.identity import hash_refresh_token, new_refresh_token
 
         _service, first = await _register(db_session)
         raw, digest = new_refresh_token()
@@ -298,8 +298,8 @@ class TestSwitchShop:
     async def test_switching_rebinds_the_token_and_rotates_the_refresh(
         self, db_session
     ):
-        from ecom_be.config.settings import get_settings
-        from ecom_be.utils.identity import decode_access_token
+        from app.config.settings import get_settings
+        from app.utils.identity import decode_access_token
 
         _service, session = await _register(db_session)
         second_shop = await shop_repository.create_shop(db_session, name="Second Shop")
@@ -355,7 +355,7 @@ class TestMe:
         await user_repository.deactivate_user(db_session, session.user)
         service = IdentityService(db_session)
 
-        from ecom_be.errors.identity import AccountInactive
+        from app.errors.identity import AccountInactive
 
         with pytest.raises(AccountInactive):
             await service.me(user_id=session.user.id, shop_id=session.active_shop.id)

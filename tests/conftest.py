@@ -39,7 +39,7 @@ def _redis_url_value() -> str:
 
 # The environment is established here, at import, rather than inside a fixture.
 #
-# ``ecom_be.main`` builds its module-level ``app`` -- and therefore
+# ``app.main`` builds its module-level ``app`` -- and therefore
 # ``app.state.settings`` -- at import time, which happens during test *collection*,
 # before any fixture runs. A fixture that later injected a different ``JWT_SECRET``
 # would leave ``get_settings()`` disagreeing with the app: a token signed by the
@@ -75,7 +75,7 @@ def _migrated_database_url() -> str:
 def clear_settings_cache():
     """Keep the cached settings from leaking one test's environment into the next."""
 
-    from ecom_be.config.settings import get_settings
+    from app.config.settings import get_settings
 
     yield
     get_settings.cache_clear()
@@ -88,7 +88,7 @@ def anyio_backend() -> str:
 
 @pytest.fixture
 async def async_client() -> AsyncIterator[AsyncClient]:
-    from ecom_be.main import app
+    from app.main import app
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -155,10 +155,10 @@ async def db_async_client(db_transaction, tmp_path) -> AsyncIterator[AsyncClient
       developer's real ``.media`` tree and leaves nothing behind.
     """
 
-    from ecom_be.api.deps import get_application_db_session, get_optional_redis_client
-    from ecom_be.api.v1.media import get_storage
-    from ecom_be.infrastructure.storage.local import LocalStorageBackend
-    from ecom_be.main import app
+    from app.api.deps import get_application_db_session, get_optional_redis_client
+    from app.api.v1.media import get_storage
+    from app.infrastructure.storage.local import LocalStorageBackend
+    from app.main import app
 
     factory = async_sessionmaker(bind=db_transaction, expire_on_commit=False)
 

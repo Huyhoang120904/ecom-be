@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from ecom_be.schemas.identity import (
+from app.schemas.identity import (
     DeactivateRequest,
     DeleteShopRequest,
     LoginRequest,

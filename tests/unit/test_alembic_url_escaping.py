@@ -23,7 +23,7 @@ import pytest
 from alembic.config import Config
 from pydantic import PostgresDsn
 
-from ecom_be.infrastructure.db.urls import escape_for_configparser
+from app.infrastructure.db.urls import escape_for_configparser
 
 REPO_ROOT = Path(__file__).parents[2]
 

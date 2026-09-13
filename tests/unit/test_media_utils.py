@@ -11,8 +11,8 @@ import io
 import pytest
 from PIL import Image
 
-from ecom_be.errors.media import ImageTooLarge, UnsupportedImage
-from ecom_be.utils import media as utils
+from app.errors.media import ImageTooLarge, UnsupportedImage
+from app.utils import media as utils
 
 MAX_BYTES = 2_097_152
 

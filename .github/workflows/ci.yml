@@ -40,7 +40,7 @@ jobs:
         run: uv run ruff check .
 
       - name: Type-check
-        run: uv run mypy src
+        run: uv run mypy app
 
       - name: Verify the lockfile is current
         run: uv lock --check
@@ -142,7 +142,7 @@ jobs:
 
       - name: Start the application
         run: |
-          uv run uvicorn ecom_be.main:app --host 127.0.0.1 --port 8000 \
+          uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 \
             > /tmp/ecom-be.log 2>&1 &
           echo "$!" > /tmp/ecom-be.pid
 
