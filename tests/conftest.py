@@ -12,6 +12,7 @@ A database assertion written against SQLite would prove nothing here: SQLite has
 ``gen_random_uuid``.
 """
 
+import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -36,13 +37,28 @@ def _redis_url_value() -> str:
     return str(RedisDsn.build(scheme="redis", host="localhost", port=6379, path="0"))
 
 
+# The environment is established here, at import, rather than inside a fixture.
+#
+# ``ecom_be.main`` builds its module-level ``app`` -- and therefore
+# ``app.state.settings`` -- at import time, which happens during test *collection*,
+# before any fixture runs. A fixture that later injected a different ``JWT_SECRET``
+# would leave ``get_settings()`` disagreeing with the app: a token signed by the
+# service would fail signature verification in the guard, because the two sides
+# would be using different secrets. That mismatch is invisible in a single-file run
+# and only surfaces when the whole suite shares a process.
+os.environ.setdefault("APP_NAME", "ecom-be")
+os.environ.setdefault("DATABASE_URL", _database_url_value())
+os.environ.setdefault("REDIS_URL", _redis_url_value())
+os.environ.setdefault("JWT_SECRET", "test-secret-that-is-long-enough-32")
+
+
 def _migrated_database_url() -> str:
     """The ``DATABASE_URL`` a developer actually migrated.
 
-    Read from ``.env`` directly rather than from ``Settings``, because the autouse
-    fixture above exports a placeholder ``DATABASE_URL`` and environment variables
-    outrank the dotenv file in pydantic-settings. Using the placeholder here would
-    point the ``db`` tests at a database with no migrations applied.
+    Read from ``.env`` directly rather than from the settings object, because the
+    test environment deliberately exports a placeholder ``DATABASE_URL`` (above) so
+    the committed suite needs no Docker. The ``db`` tests are the exception: they
+    should point at the migrated compose database, not at the placeholder.
     """
 
     env_path = Path(__file__).parents[1] / ".env"
@@ -56,17 +72,12 @@ def _migrated_database_url() -> str:
 
 
 @pytest.fixture(autouse=True)
-def configure_settings_environment(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("APP_NAME", "ecom-be")
-    monkeypatch.setenv("DATABASE_URL", _database_url_value())
-    monkeypatch.setenv("REDIS_URL", _redis_url_value())
-    # Required with no default: a missing signing secret refuses startup, so every
-    # test that constructs Settings needs one.
-    monkeypatch.setenv("JWT_SECRET", "test-secret-that-is-long-enough-32")
-    yield
+def clear_settings_cache():
+    """Keep the cached settings from leaking one test's environment into the next."""
 
     from ecom_be.core.config import get_settings
 
+    yield
     get_settings.cache_clear()
 
 
@@ -117,14 +128,19 @@ async def db_session(db_engine) -> AsyncIterator[AsyncSession]:
 
 @pytest.fixture
 async def db_async_client(db_engine) -> AsyncIterator[AsyncClient]:
-    """An HTTP client whose application shares ``db_session``'s transaction.
+    """An HTTP client whose application shares a transaction and skips rate limiting.
 
-    Overriding the session dependency is what makes a ``db``-marked API test
-    coherent: the endpoint writes through the same connection the test reads from,
-    so the test sees its own data instead of a stale snapshot.
+    Two overrides, for two different reasons:
+
+    * The session, so the endpoint writes through the same connection the test reads
+      from and therefore sees its own data rather than a stale snapshot.
+    * The Redis client for rate limiting, because a shared counter in a real Redis is
+      cross-test state: enough logins across a suite trip the limit and later tests
+      start failing with a 429 that has nothing to do with what they assert.
+      ``None`` means "no limiting", which the limiter already treats as fail-open.
     """
 
-    from ecom_be.api.deps import get_application_db_session
+    from ecom_be.api.deps import get_application_db_session, get_optional_redis_client
     from ecom_be.main import app
 
     engine = create_async_engine(_migrated_database_url(), pool_pre_ping=True)
@@ -132,17 +148,22 @@ async def db_async_client(db_engine) -> AsyncIterator[AsyncClient]:
     transaction = await connection.begin()
     factory = async_sessionmaker(bind=connection, expire_on_commit=False)
 
-    async def override() -> AsyncIterator[AsyncSession]:
+    async def override_session() -> AsyncIterator[AsyncSession]:
         async with factory() as session:
             yield session
 
-    app.dependency_overrides[get_application_db_session] = override
+    async def no_redis():
+        return None
+
+    app.dependency_overrides[get_application_db_session] = override_session
+    app.dependency_overrides[get_optional_redis_client] = no_redis
     transport = ASGITransport(app=app)
     try:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             yield client
     finally:
         app.dependency_overrides.pop(get_application_db_session, None)
+        app.dependency_overrides.pop(get_optional_redis_client, None)
         await transaction.rollback()
         await connection.close()
         await engine.dispose()

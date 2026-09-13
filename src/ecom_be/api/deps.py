@@ -34,13 +34,32 @@ async def get_application_db_session(request: Request) -> AsyncIterator[AsyncSes
 
 
 async def get_redis_client(request: Request) -> Redis:
-    """Return the Redis client owned by the application lifecycle."""
+    """Return the Redis client owned by the application lifecycle.
+
+    Raises when it is missing, because a caller that genuinely needs Redis (the
+    readiness probe) must not silently proceed without it.
+    """
 
     client: Redis | None = getattr(request.app.state, "redis_client", None)
     if client is None:
         client = getattr(request.app.state, "redis", None)
     if client is None:
         raise RuntimeError("Redis client is not initialized")
+    return client
+
+
+async def get_optional_redis_client(request: Request) -> Redis | None:
+    """Return the lifecycle Redis client, or ``None`` when there is none.
+
+    Used by rate limiting, whose policy is explicitly fail-open: a cache outage must
+    not turn into a sign-in outage. Returning ``None`` here is what makes that policy
+    reachable, rather than the limiter raising before it can apply it. The readiness
+    probe uses ``get_redis_client`` instead, because it *should* fail loudly.
+    """
+
+    client: Redis | None = getattr(request.app.state, "redis_client", None)
+    if client is None:
+        client = getattr(request.app.state, "redis", None)
     return client
 
 

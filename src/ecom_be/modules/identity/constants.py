@@ -46,3 +46,8 @@ SLUG_FALLBACK = "shop"
 
 # Multipart part name for both image uploads.
 UPLOAD_FIELD_NAME = "file"
+
+ROLE_KEY_MAX = 64
+ROLE_NAME_MAX = 80
+PERMISSION_KEY_MAX = 64
+PERMISSION_DESCRIPTION_MAX = 200

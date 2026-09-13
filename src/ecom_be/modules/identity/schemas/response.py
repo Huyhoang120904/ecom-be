@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
 
@@ -25,11 +25,22 @@ from ecom_be.modules.identity.constants import (
     EMAIL_MAX,
     FULL_NAME_MAX,
     JOB_TITLE_MAX,
+    PERMISSION_KEY_MAX,
     PHONE_MAX_INPUT,
+    ROLE_KEY_MAX,
+    ROLE_NAME_MAX,
     SHOP_DESCRIPTION_MAX,
     SHOP_NAME_MAX,
     URL_MAX,
 )
+
+# Every string in a response is bounded, including list members, because the
+# generated OpenAPI document is the contract and a client generating from it should
+# not have to guess a maximum. ``tests/unit/test_openapi_string_limits.py`` walks the
+# document and fails on any unbounded string it finds.
+PermissionKey = Annotated[str, Field(max_length=PERMISSION_KEY_MAX)]
+RoleKey = Annotated[str, Field(max_length=ROLE_KEY_MAX)]
+RoleName = Annotated[str, Field(max_length=ROLE_NAME_MAX)]
 
 
 class UserData(BaseModel):
@@ -60,8 +71,8 @@ class ShopData(BaseModel):
 
 
 class RoleData(BaseModel):
-    key: str = Field(max_length=64)
-    name: str = Field(max_length=80)
+    key: RoleKey
+    name: RoleName
 
 
 class MembershipData(BaseModel):
@@ -84,7 +95,7 @@ class SessionData(BaseModel):
     user: UserData
     active_shop: ShopData
     memberships: list[MembershipData]
-    permissions: list[str]
+    permissions: list[PermissionKey]
 
 
 class MeData(BaseModel):
@@ -93,7 +104,7 @@ class MeData(BaseModel):
     user: UserData
     active_shop: ShopData
     memberships: list[MembershipData]
-    permissions: list[str]
+    permissions: list[PermissionKey]
 
 
 class SessionEnvelope(BaseResponse[SessionData]): ...
