@@ -78,7 +78,11 @@ known-first-party = ["ecom_be"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers --strict-config"
+# `-m "not db"` keeps the committed suite Docker-free by default, which is the rule
+# AGENTS.md sets. Tests that assert real PostgreSQL behaviour are marked `db` and
+# run explicitly with `uv run pytest -q -m db` against `docker compose up -d --wait`.
+addopts = '-ra --strict-markers --strict-config -m "not db"'
 markers = [
     "anyio: asynchronous test executed by the anyio pytest plugin",
+    "db: requires the compose PostgreSQL; excluded from the default run",
 ]
