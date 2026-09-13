@@ -1,0 +1,37 @@
+[project]
+name = "ecom-be"
+version = "0.1.0"
+description = "Async FastAPI backend for the ecommerce application"
+readme = "README.md"
+authors = [
+    { name = "hoangvitech1209", email = "hoangnh@vitechdigital.vn" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "alembic>=1.20.0",
+    "asyncpg>=0.31.0",
+    "fastapi>=0.141.1",
+    "pydantic-settings>=2.15.0",
+    "redis>=8.1.0",
+    "sqlalchemy>=2.0.52",
+    "uvicorn[standard]>=0.52.4",
+]
+
+[project.scripts]
+ecom-be = "ecom_be:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.7",
+]
+
+[tool.mypy]
+plugins = ["pydantic.mypy"]
