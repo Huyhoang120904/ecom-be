@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 from ecom_be.core.config import get_settings
 from ecom_be.infrastructure.db.models import metadata
+from ecom_be.infrastructure.db.urls import escape_for_configparser
 
 config = context.config
 
@@ -28,7 +29,14 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # The single source of truth for both runtime and migration connections.
-config.set_main_option("sqlalchemy.url", str(get_settings().database_url))
+# `set_main_option` stores the value through configparser, where `%` opens an
+# interpolation token, so escape it: a URL-encoded credential such as `p%40ss`
+# would otherwise raise `ValueError: invalid interpolation syntax` and abort the
+# migration. `get_main_option` interpolates the escape back to this exact DSN.
+config.set_main_option(
+    "sqlalchemy.url",
+    escape_for_configparser(str(get_settings().database_url)),
+)
 
 # The named metadata view: it imports the shared declarative Base and every
 # module's ORM models, so autogenerate compares against all of them. Add new
