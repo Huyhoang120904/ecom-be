@@ -133,16 +133,21 @@ async def test_soft_deleting_releases_the_slug_for_reuse(db_session):
 
 
 async def test_a_system_role_cannot_be_soft_deleted(db_session):
-    """The partial unique index keeps the key, so a soft delete is unrecoverable."""
+    """The partial unique index keeps the key, so a soft delete is unrecoverable.
+
+    Uses a key the seed does not own, so this asserts the constraint rather than
+    the seed's presence.
+    """
 
     await db_session.execute(
-        text("INSERT INTO roles (key, name) VALUES ('owner', 'Owner')")
+        text("INSERT INTO roles (key, name) VALUES ('probe_system', 'Probe System')")
     )
 
     with pytest.raises(IntegrityError) as excinfo:
-        await db_session.execute(
-            text("UPDATE roles SET deleted_at = now() WHERE key = 'owner'")
-        )
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text("UPDATE roles SET deleted_at = now() WHERE key = 'probe_system'")
+            )
 
     assert "roles_system_role_not_deleted" in str(excinfo.value)
 
@@ -170,14 +175,17 @@ async def test_a_shop_scoped_role_may_be_soft_deleted(db_session):
 
 
 async def test_two_system_roles_cannot_share_a_key(db_session):
+    """A key the seed does not own, so this tests uniqueness rather than the seed."""
+
     await db_session.execute(
-        text("INSERT INTO roles (key, name) VALUES ('viewer', 'Viewer')")
+        text("INSERT INTO roles (key, name) VALUES ('probe_dup', 'Probe One')")
     )
 
     with pytest.raises(IntegrityError) as excinfo:
-        await db_session.execute(
-            text("INSERT INTO roles (key, name) VALUES ('viewer', 'Viewer Two')")
-        )
+        async with db_session.begin_nested():
+            await db_session.execute(
+                text("INSERT INTO roles (key, name) VALUES ('probe_dup', 'Probe Two')")
+            )
 
     assert "roles_system_key_uniq" in str(excinfo.value)
 
