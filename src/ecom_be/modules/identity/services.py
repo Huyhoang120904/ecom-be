@@ -220,6 +220,15 @@ class IdentityService:
             raise InvalidToken
 
         if stored.revoked_at is not None:
+            # A revoked token presented again is the signature of a stolen value, so
+            # the whole family dies. One exception: if the account was deactivated,
+            # that is the real reason and the honest answer. Checking it first keeps
+            # the client's error code accurate and avoids logging a reuse alarm for
+            # an action the seller took themselves.
+            owner = await repository.get_user(self._session, stored.user_id)
+            if owner is not None and owner.deactivated_at is not None:
+                raise AccountInactive
+
             revoked = await repository.revoke_family(self._session, stored.family_id)
             await self._session.commit()
             logger.warning(

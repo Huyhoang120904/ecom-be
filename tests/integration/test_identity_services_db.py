@@ -12,6 +12,7 @@ import pytest
 from ecom_be.modules.identity import repository
 from ecom_be.modules.identity.errors import (
     AccountDeactivated,
+    AccountInactive,
     ConfirmationMismatch,
     EmailTaken,
     InvalidCredentials,
@@ -395,9 +396,12 @@ class TestDeactivation:
 
         await service.deactivate(user_id=session.user.id, password=PASSWORD)
 
-        with pytest.raises(InvalidToken):
+        # Both sessions report the accurate reason: the account is inactive, not that
+        # the token was reused. The distinction matters to a client deciding whether
+        # to prompt for credentials or to stop entirely.
+        with pytest.raises(AccountInactive):
             await service.refresh(session.refresh_token)
-        with pytest.raises(InvalidToken):
+        with pytest.raises(AccountInactive):
             await service.refresh(second.refresh_token)
         with pytest.raises(AccountDeactivated):
             await service.login(email="owner@example.com", password=PASSWORD)
