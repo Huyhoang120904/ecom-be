@@ -21,13 +21,17 @@ cp .env.example .env
 
 `uv sync` installs the locked runtime and development dependencies into
 `.venv`. Edit `.env` and replace both URL placeholders with your own local
-service URLs, using the components the comments in `.env.example` describe:
-the async driver `postgresql+asyncpg`, host `localhost`, the `POSTGRES_*`
-values, and the published `POSTGRES_PORT`/`REDIS_PORT`. Build the URLs from
-those parts rather than committing a ready-made connection string.
+service URLs: use the async driver `postgresql+asyncpg`, host `localhost`, and
+the published ports `55432` (PostgreSQL) and `56379` (Redis) that
+`compose.yaml` defaults to. Build the URLs from those parts rather than
+committing a ready-made connection string.
 
-`Settings` requires `DATABASE_URL` and `REDIS_URL` and rejects unknown keys, so
-a stale `.env` fails fast at import time instead of at the first query.
+`.env` holds **only** the five keys `.env.example` lists. `Settings` requires
+`DATABASE_URL` and `REDIS_URL` and rejects unknown keys, so a stale `.env` fails
+fast at import time instead of at the first query. Compose variables such as
+`POSTGRES_PORT` belong in `compose.env`, never in `.env` — see
+[Two environment surfaces](#two-environment-surfaces).
+
 `CORS_ORIGINS` is a JSON array of explicit origins; a `*` entry is refused
 because the policy allows credentials.
 
@@ -41,18 +45,43 @@ committed.
 runs without Docker:
 
 ```bash
-docker compose up -d --wait    # PostgreSQL 16 and Redis 7, both health-checked
-docker compose ps              # expect (healthy) for both
-docker compose down            # leaves the named volumes intact
+docker compose up -d --wait        # PostgreSQL 16 and Redis 7, both health-checked
+docker compose ps                  # expect (healthy) for both
+docker compose down                # leaves the named volumes intact
 ```
 
 The credentials in `compose.yaml` (`app` / `app`) are disposable
 local-development values with env-var overrides. They are deliberately obvious,
 they are not production credentials, and they must never be reused outside a
 throwaway developer machine. Host ports default to `55432` and `56379` so they
-do not collide with another project already using `5432`/`6379`; override
-`POSTGRES_PORT`/`REDIS_PORT` to change them. Data lives in the named volumes
-`postgres-data` and `redis-data`.
+do not collide with another project already using `5432`/`6379`. Data lives in
+the named volumes `postgres-data` and `redis-data`.
+
+### Two environment surfaces
+
+An application setting and a Compose variable are different things, and they
+live in different files:
+
+| File | Read by | Keys |
+| --- | --- | --- |
+| `.env` (untracked) | `Settings` via `env_file` | `APP_NAME`, `ENVIRONMENT`, `DATABASE_URL`, `REDIS_URL`, `CORS_ORIGINS` |
+| `compose.env` (untracked) | `docker compose --env-file` | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT`, `REDIS_PORT` |
+
+`Settings` rejects unknown keys, so a compose variable written into `.env`
+makes the application fail to start with
+`ValidationError: postgres_port Extra inputs are not permitted` — an error that
+looks unrelated to Compose. Never put a compose variable in `.env`.
+
+To override the compose values, copy the tracked example and pass it explicitly:
+
+```bash
+cp compose.env.example compose.env
+docker compose --env-file compose.env up -d --wait
+```
+
+Omitting `--env-file` is fine: with no `compose.env`, `compose.yaml` falls back
+to its own defaults, and `--env-file` is what keeps the overrides out of the
+application's `.env`. `compose.env.example` documents the same five keys.
 
 The application container is defined separately in `Dockerfile`:
 
@@ -95,17 +124,36 @@ rules CI runs. `uv run pytest -q` passes without any Docker service running.
 
 Alembic reads the database URL from the validated application settings, so the
 application and its migrations always use the same `DATABASE_URL`; no
-connection string is stored in `alembic.ini`. `alembic/env.py` imports only the
-shared declarative `Base` from `ecom_be.infrastructure.db.base`, and the async
-engine is created with `async_engine_from_config` (NullPool), so
-`uv run alembic upgrade head` runs the real async driver.
+connection string is stored in `alembic.ini`. The async engine is created with
+`async_engine_from_config` (NullPool), so `uv run alembic upgrade head` runs the
+real async driver.
+
+Autogenerate compares the live database against a single named aggregation
+point:
+
+```
+src/ecom_be/infrastructure/db/models.py
+```
+
+That module imports the shared declarative `Base` and every module's ORM
+models, and exports the resulting `metadata` object, which is what
+`alembic/env.py` assigns to `target_metadata`. A model class that is not
+imported there is invisible to autogenerate.
 
 The scaffold has an empty migration history on purpose: the health module has
 no ORM business model, and inventing a table just to make the history look
-populated would be fake data. A first real module adds its model, imports it so
-it registers on the same `Base.metadata`, and generates the first revision.
-When a module adds a model, import it in that module's models package *and*
-ensure `env.py`'s `target_metadata` sees it.
+populated would be fake data. Adding the first persisted module means:
+
+1. Write `modules/<module_name>/models.py`, declaring the model on
+   `ecom_be.infrastructure.db.base.Base`.
+2. Import that model class in `src/ecom_be/infrastructure/db/models.py` and add
+   its name to that file's `__all__`.
+3. `uv run alembic revision --autogenerate -m "<change>"`, then
+   `uv run alembic upgrade head`.
+
+`tests/unit/test_migration_metadata.py` fails if a module ships a `models.py`
+that the aggregation point does not import, so this step cannot be forgotten
+silently.
 
 `alembic/versions/` is tracked through a `.gitkeep` so revisions have a home.
 
@@ -188,8 +236,9 @@ module that needs persistence adds `models.py`, not a new schema strategy.
 3. Reuse the request-scoped session from `ecom_be.infrastructure.db.session` and
    the lifecycle-owned Redis client from `app.state`; do not create clients per
    request.
-4. If the module persists data, add `models.py`, import it in `env.py`'s
-   metadata view, and generate a migration.
+4. If the module persists data, add `models.py`, import the model class in
+   `src/ecom_be/infrastructure/db/models.py` (the Alembic metadata aggregation
+   point), and generate a migration.
 5. Add unit tests under `tests/unit/` and API tests under
    `tests/integration/`.
 

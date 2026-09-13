@@ -13,6 +13,17 @@
 # Host ports are overridable so a machine already using 5432/6379 for another
 # project can still start these services; the application reaches them through
 # DATABASE_URL and REDIS_URL in the untracked `.env` file.
+#
+# Every `${...}` below is a COMPOSE-ONLY value. It is documented and set in
+# `compose.env.example`, NOT in `.env`: the application's `Settings` forbids
+# unknown keys, so a compose key written into `.env` would make the app fail to
+# start. To override, copy that file and pass it explicitly:
+#
+#   cp compose.env.example compose.env
+#   docker compose --env-file compose.env up -d --wait
+#
+# Without the flag the defaults in this file apply, and they already keep this
+# project off the usual 5432/6379 ports.
 
 name: ecom-be
 

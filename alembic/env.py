@@ -1,9 +1,13 @@
 """Alembic environment for the settings-driven async engine.
 
 The migration URL comes from the validated application settings, so the same
-``DATABASE_URL`` drives the application and its migrations. Only the shared
-declarative ``Base.metadata`` is imported: this scaffold has no persisted
-business entity yet, and ``alembic upgrade head`` is expected to succeed with an
+``DATABASE_URL`` drives the application and its migrations.
+
+``target_metadata`` is the aggregation view
+``ecom_be.infrastructure.db.models``, which imports every module's ORM models so
+they register on the shared declarative ``Base``. That import is what makes
+``alembic revision --autogenerate`` see a new module's tables. This scaffold has
+no persisted business entity yet, so ``alembic upgrade head`` succeeds with an
 empty migration history.
 """
 
@@ -16,7 +20,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 from ecom_be.core.config import get_settings
-from ecom_be.infrastructure.db.base import Base
+from ecom_be.infrastructure.db.models import metadata
 
 config = context.config
 
@@ -26,9 +30,10 @@ if config.config_file_name is not None:
 # The single source of truth for both runtime and migration connections.
 config.set_main_option("sqlalchemy.url", str(get_settings().database_url))
 
-# Import only the shared declarative base. Business modules add their models by
-# importing them so they register on this same metadata object.
-target_metadata = Base.metadata
+# The named metadata view: it imports the shared declarative Base and every
+# module's ORM models, so autogenerate compares against all of them. Add new
+# models to `ecom_be.infrastructure.db.models`, not here.
+target_metadata = metadata
 
 
 def run_migrations_offline() -> None:

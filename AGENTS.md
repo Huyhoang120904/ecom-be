@@ -31,6 +31,7 @@ src/ecom_be/
 ├── core/                       # config, error handlers, structured logging
 ├── infrastructure/             # external systems
 │   ├── db/base.py              # the single declarative Base
+│   ├── db/models.py            # imports module models; Alembic target_metadata
 │   ├── db/session.py           # async engine + request-scoped session factory
 │   └── cache/redis.py          # async Redis client factory
 └── modules/                    # feature modules
@@ -91,9 +92,14 @@ entity — `modules/health/` is that case. A module that persists anything adds
    composes modules.
 3. Take the request-scoped session and the lifecycle-owned Redis client from
    application state; do not build per-request clients.
-4. For persisted data: add `models.py`, make sure the model is imported so it
-   registers on `Base.metadata`, then `uv run alembic revision --autogenerate -m "..."`
-   and `uv run alembic upgrade head`.
+4. For persisted data: write `models.py` on the shared `Base`, then import the
+   model class in `src/ecom_be/infrastructure/db/models.py` — the single
+   aggregation point `alembic/env.py` uses as `target_metadata` — and add its
+   name to that file's `__all__`. Then
+   `uv run alembic revision --autogenerate -m "..."` and
+   `uv run alembic upgrade head`. A model not imported there is invisible to
+   autogenerate; `tests/unit/test_migration_metadata.py` fails if a module's
+   `models.py` is missing from that view.
 5. Add unit tests in `tests/unit/` and API tests in `tests/integration/`.
 
 ## Local services and migrations
@@ -101,6 +107,13 @@ entity — `modules/health/` is that case. A module that persists anything adds
 - `compose.yaml` starts local PostgreSQL 16 and Redis 7 with health checks and
   named volumes. Its credentials are disposable development values with env-var
   overrides — never production credentials, never reused elsewhere.
+- **Two env surfaces, never mixed.** `.env` is parsed by `Settings`, which
+  forbids unknown keys; it holds only `APP_NAME`, `ENVIRONMENT`, `DATABASE_URL`,
+  `REDIS_URL`, and `CORS_ORIGINS`. Compose variables (`POSTGRES_DB`,
+  `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_PORT`, `REDIS_PORT`) belong in
+  `compose.env`, documented by the tracked `compose.env.example`, and are passed
+  with `docker compose --env-file compose.env`. A compose key written into
+  `.env` makes the application fail to start with a `ValidationError`.
 - The committed test suite must pass with no Docker service running. Tests that
   need live PostgreSQL or Redis belong in the CI `readiness` job.
 - Alembic takes its URL from the validated settings (`DATABASE_URL`); no

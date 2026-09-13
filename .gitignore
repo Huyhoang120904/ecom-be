@@ -11,6 +11,9 @@ venv/
 .env
 .env.*
 !.env.example
+# Compose-only variables: `.env` is parsed by `Settings`, which forbids unknown
+# keys, so compose overrides live in their own file (see compose.env.example).
+compose.env
 
 # Test, lint, and type-check caches
 .pytest_cache/
