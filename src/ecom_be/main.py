@@ -26,8 +26,10 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        await redis_client.aclose()
-        await application.state.db_engine.dispose()
+        try:
+            await redis_client.aclose()
+        finally:
+            await application.state.db_engine.dispose()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
