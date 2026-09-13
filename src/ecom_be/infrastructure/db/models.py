@@ -26,14 +26,28 @@ from sqlalchemy import MetaData
 from ecom_be.infrastructure.db.base import Base
 
 # --- Module model imports ----------------------------------------------------
-# No module persists anything yet: the health module is I/O-free and has no
-# ORM entity, so this scaffold has an intentionally empty migration history.
-# Register a new persisted module here, for example:
-#
-# then append ``"Order"`` to ``__all__`` below.
-# ----------------------------------------------------------------------------
+# Importing the class is what registers its table on the shared metadata, and the
+# aggregation guard in tests/unit/test_migration_metadata.py fails when a module's
+# models.py is missing from this block.
+from ecom_be.modules.identity.models import (
+    Membership,
+    Permission,
+    RefreshToken,
+    Role,
+    RolePermission,
+    Shop,
+    User,
+)
 
-__all__: list[str] = []
+__all__: list[str] = [
+    "Membership",
+    "Permission",
+    "RefreshToken",
+    "Role",
+    "RolePermission",
+    "Shop",
+    "User",
+]
 
 # Handed to Alembic as ``target_metadata``. Every model imported above lands on
 # this same object because they all share the one declarative ``Base``.
