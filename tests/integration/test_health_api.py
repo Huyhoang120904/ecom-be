@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 
 import pytest
 
@@ -187,6 +188,156 @@ def test_create_app_configures_json_logging():
         isinstance(handler.formatter, StructuredJsonFormatter)
         for handler in logging.getLogger().handlers
     )
+
+
+@pytest.mark.anyio
+async def test_http_exception_preserves_response_headers():
+    from fastapi import HTTPException
+    from httpx import ASGITransport, AsyncClient
+
+    from ecom_be.main import create_app
+
+    application = create_app()
+
+    async def unauthorized_route():
+        raise HTTPException(
+            status_code=401,
+            detail="token=do-not-expose",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    async def throttled_route():
+        raise HTTPException(
+            status_code=429,
+            detail="slow down",
+            headers={"Retry-After": "30"},
+        )
+
+    application.add_api_route("/test-unauthorized", unauthorized_route, methods=["GET"])
+    application.add_api_route("/test-throttled", throttled_route, methods=["GET"])
+    transport = ASGITransport(app=application)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        unauthorized = await client.get("/test-unauthorized")
+        throttled = await client.get("/test-throttled")
+
+    assert unauthorized.status_code == 401
+    assert unauthorized.json() == {
+        "error": "unauthorized",
+        "message": "Authentication required",
+    }
+    assert unauthorized.headers["www-authenticate"] == "Bearer"
+    assert throttled.status_code == 429
+    assert throttled.json() == {
+        "error": "too_many_requests",
+        "message": "Too many requests",
+    }
+    assert throttled.headers["retry-after"] == "30"
+
+
+def test_redaction_covers_quoted_json_and_container_reprs():
+    from ecom_be.core.logging import StructuredJsonFormatter, redact_sensitive_data
+
+    payload_log = 'body={"username":"bob","password":"hunter2"}'
+    quoted_json_log = '{"token": "abc123"}'
+    api_key_log = 'api_key "k-123"'
+    dict_repr_record = logging.makeLogRecord(
+        {
+            "name": "test.logger",
+            "levelno": logging.INFO,
+            "levelname": "INFO",
+            "msg": "payload=%s",
+            "args": ({"password": "hunter2", "token": "tok-9"},),
+        }
+    )
+
+    assert "hunter2" not in redact_sensitive_data(payload_log)
+    assert '"username":"bob"' in redact_sensitive_data(payload_log)
+    assert "abc123" not in redact_sensitive_data(quoted_json_log)
+    assert "k-123" not in redact_sensitive_data(api_key_log)
+
+    output = StructuredJsonFormatter().format(dict_repr_record)
+
+    assert "hunter2" not in output
+    assert "tok-9" not in output
+    assert json.loads(output)["message"].startswith("payload=")
+
+
+def test_configure_logging_redacts_uvicorn_loggers():
+    from ecom_be.core.logging import RedactingFilter, configure_logging
+
+    configure_logging()
+
+    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uvicorn_logger = logging.getLogger(logger_name)
+        assert any(
+            isinstance(log_filter, RedactingFilter)
+            for log_filter in uvicorn_logger.filters
+        ), logger_name
+        assert all(
+            any(
+                isinstance(log_filter, RedactingFilter)
+                for log_filter in handler.filters
+            )
+            for handler in uvicorn_logger.handlers
+        ), logger_name
+
+
+def test_uvicorn_logger_records_are_redacted_with_traceback():
+    from ecom_be.core.logging import configure_logging
+
+    configure_logging()
+
+    class _CaptureHandler(logging.Handler):
+        def __init__(self) -> None:
+            super().__init__()
+            self.messages: list[str] = []
+
+        def emit(self, record: logging.LogRecord) -> None:
+            self.messages.append(self.format(record))
+
+    handler = _CaptureHandler()
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    uvicorn_logger = logging.getLogger("uvicorn.error")
+    uvicorn_logger.addHandler(handler)
+    try:
+        try:
+            raise RuntimeError("connect failed password=hunter2")
+        except RuntimeError:
+            caught = sys.exc_info()
+            uvicorn_logger.error("Exception in ASGI application", exc_info=caught)
+    finally:
+        uvicorn_logger.removeHandler(handler)
+
+    output = "\n".join(handler.messages)
+
+    assert "hunter2" not in output
+    assert "RuntimeError" in output
+    assert "Traceback" in output
+
+
+def test_exception_tracebacks_are_preserved_and_redacted():
+    from ecom_be.core.logging import RedactingFilter, StructuredJsonFormatter
+
+    try:
+        raise RuntimeError("connect failed password=hunter2")
+    except RuntimeError:
+        record = logging.LogRecord(
+            name="test.logger",
+            level=logging.ERROR,
+            pathname=__file__,
+            lineno=1,
+            msg="operation failed",
+            args=(),
+            exc_info=sys.exc_info(),
+        )
+
+    RedactingFilter().filter(record)
+    output = StructuredJsonFormatter().format(record)
+    payload = json.loads(output)
+
+    assert "hunter2" not in output
+    assert "Traceback" in payload["traceback"]
+    assert "RuntimeError" in payload["traceback"]
 
 
 @pytest.mark.anyio

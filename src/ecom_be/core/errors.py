@@ -39,6 +39,7 @@ def http_exception_handler(
     return JSONResponse(
         status_code=status_code,
         content={"error": error, "message": message},
+        headers=getattr(exc, "headers", None),
     )
 
 

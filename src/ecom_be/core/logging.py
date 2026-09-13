@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import sys
+import traceback
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -33,9 +34,14 @@ _AUTHORIZATION_PATTERN = re.compile(
 )
 _BEARER_PATTERN = re.compile(r"(?i)\b(?:bearer|basic)\s+[^\s,;]+")
 _COOKIE_PATTERN = re.compile(r"(?i)(\bcookies?(?:\s*[:=]\s*|\s+))[^\r\n]+")
+_SECRET_KEY_NAMES = (
+    r"password|passwd|pwd|secret|token|access_token|refresh_token|"
+    r"id_token|api[_-]?key|connection_string|database_url|redis_url|dsn"
+)
 _SECRET_ASSIGNMENT_PATTERN = re.compile(
-    r"(?i)(\b(?:password|passwd|pwd|secret|token|access_token|refresh_token|"
-    r"id_token|api[_-]?key|connection_string|database_url|redis_url|dsn)\s*[:=]\s*)[^\s,;]+"
+    r"(?i)(\b(?:" + _SECRET_KEY_NAMES + r")[\"']?\s*[:=]\s*[\"']?"
+    r"|\b(?:" + _SECRET_KEY_NAMES + r")\s+[\"'])"
+    r"([^\"'\s,;{}\[\]]+)"
 )
 _CONNECTION_STRING_PATTERN = re.compile(
     r"(?i)\b(?:postgres(?:ql)?(?:\+[^:/\s]+)?|redis(?:s)?|mysql(?:\+[^:/\s]+)?|"
@@ -81,6 +87,20 @@ def _is_sensitive_key(key: object) -> bool:
 
 
 def _redact_string(value: str) -> str:
+    stripped = value.strip()
+    if stripped[:1] in {"{", "["}:
+        try:
+            parsed = json.loads(stripped)
+        except ValueError:
+            pass
+        else:
+            if isinstance(parsed, (Mapping, list)):
+                return json.dumps(
+                    redact_sensitive_data(parsed),
+                    default=str,
+                    ensure_ascii=False,
+                )
+
     value = _CREDENTIAL_URL_PATTERN.sub(_REDACTED, value)
     value = _CONNECTION_STRING_PATTERN.sub(_REDACTED, value)
     value = _AUTHORIZATION_PATTERN.sub(rf"\1{_REDACTED}", value)
@@ -123,11 +143,18 @@ def _redact_record(record: logging.LogRecord) -> None:
             continue
         setattr(record, field_name, redact_sensitive_data(field_value, key=field_name))
 
-    # Exception text can contain a password or connection string. The
-    # generic application error handler logs a safe event instead.
-    record.exc_info = None
-    record.exc_text = None
-    record.stack_info = None
+    # Tracebacks are useful diagnostics and may contain a password or
+    # connection string, so keep them but redact the formatted text.
+    if record.exc_info:
+        try:
+            formatted = "".join(traceback.format_exception(*record.exc_info))
+        except Exception:  # noqa: BLE001 - malformed exc_info must not break logging
+            formatted = ""
+        record.exc_text = _redact_string(formatted) if formatted else None
+    elif record.exc_text:
+        record.exc_text = _redact_string(record.exc_text)
+    if record.stack_info:
+        record.stack_info = _redact_string(record.stack_info)
 
 
 class RedactingFilter(logging.Filter):
@@ -154,6 +181,8 @@ class StructuredJsonFormatter(logging.Formatter):
             if field_name not in _STANDARD_LOG_RECORD_FIELDS
         }
         payload.update(redact_sensitive_data(extras))
+        if record.exc_text:
+            payload["traceback"] = _redact_string(record.exc_text)
         safe_payload = redact_sensitive_data(payload)
         return json.dumps(
             safe_payload,
@@ -167,6 +196,15 @@ JsonFormatter = StructuredJsonFormatter
 SensitiveDataFilter = RedactingFilter
 
 
+def _attach_redaction(logger: logging.Logger, formatter: logging.Formatter) -> None:
+    for handler in logger.handlers:
+        handler.setFormatter(formatter)
+        if not any(isinstance(item, RedactingFilter) for item in handler.filters):
+            handler.addFilter(RedactingFilter())
+    if not any(isinstance(item, RedactingFilter) for item in logger.filters):
+        logger.addFilter(RedactingFilter())
+
+
 def configure_logging(level: int | str = logging.INFO) -> None:
     """Configure process logging with JSON output and redaction."""
 
@@ -177,7 +215,11 @@ def configure_logging(level: int | str = logging.INFO) -> None:
     if not root_logger.handlers:
         root_logger.addHandler(logging.StreamHandler(sys.stdout))
 
-    for handler in root_logger.handlers:
-        handler.setFormatter(formatter)
-        if not any(isinstance(item, RedactingFilter) for item in handler.filters):
-            handler.addFilter(RedactingFilter())
+    _attach_redaction(root_logger, formatter)
+
+    # Uvicorn configures its own loggers with ``propagate=False`` and its own
+    # handlers, so records never reach the root logger. Attach redaction
+    # directly to those loggers and their handlers to keep server and access
+    # logs -- including re-raised tracebacks -- free of credentials.
+    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        _attach_redaction(logging.getLogger(logger_name), formatter)
