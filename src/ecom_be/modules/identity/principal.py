@@ -28,11 +28,21 @@ class Principal:
     shop_is_active: bool
 
     def has(self, *keys: str) -> bool:
-        """Return whether this principal holds every one of ``keys``."""
+        """Return whether this principal holds every permission key."""
 
         return all(key in self.permissions for key in keys)
 
     def has_any(self, *keys: str) -> bool:
-        """Return whether this principal holds at least one of ``keys``."""
+        """Return whether this principal holds at least one permission key."""
 
         return any(key in self.permissions for key in keys)
+
+    def has_role(self, key: str) -> bool:
+        """Return whether this principal holds this role in the active shop."""
+
+        return key in self.roles
+
+    def has_any_role(self, *keys: str) -> bool:
+        """Return whether this principal holds at least one of these roles."""
+
+        return any(key in self.roles for key in keys)
