@@ -16,7 +16,9 @@ from ecom_be.errors.identity import (
     ShopNotAccessible,
 )
 from ecom_be.infrastructure.db import session as db_session
-from ecom_be.repositories import identity as repository
+from ecom_be.repositories import membership as membership_repository
+from ecom_be.repositories import shop as shop_repository
+from ecom_be.repositories import user as user_repository
 from ecom_be.utils import identity as utils
 
 get_db_session = db_session.get_db_session
@@ -134,20 +136,20 @@ async def get_current_principal(
     except (KeyError, ValueError) as error:
         raise InvalidToken from error
 
-    resolved = await repository.effective_permissions(
+    resolved = await membership_repository.effective_permissions(
         session, user_id=user_id, shop_id=shop_id
     )
     if resolved is None:
         # Three different states collapse into one query result, and they deserve
         # different answers. An inactive account tells the client to stop retrying;
         # an inaccessible shop tells it to pick another.
-        user = await repository.get_user(session, user_id)
+        user = await user_repository.get_user(session, user_id)
         if user is None or user.deactivated_at is not None:
             raise AccountInactive
         raise ShopNotAccessible
 
     user, role, permissions = resolved
-    shop = await repository.get_shop(session, shop_id)
+    shop = await shop_repository.get_shop(session, shop_id)
     if shop is None:
         raise ShopNotAccessible
     if not shop.is_active:

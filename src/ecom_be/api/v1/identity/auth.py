@@ -28,11 +28,13 @@ from ecom_be.schemas.identity import (
     SwitchShopRequest,
 )
 from ecom_be.services.identity import (
+    IdentityService,
+)
+from ecom_be.services.rate_limit import (
     LOGIN_LIMIT,
     LOGIN_WINDOW_SECONDS,
     REGISTER_LIMIT,
     REGISTER_WINDOW_SECONDS,
-    IdentityService,
     RateLimitStore,
     enforce_rate_limit,
 )

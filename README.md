@@ -297,10 +297,20 @@ src/ecom_be/
 │   ├── common.py               # the BaseResponse envelope
 │   ├── identity.py             # request and response models
 │   └── health.py
-├── repositories/               # database operations, one module per feature
-│   └── identity.py
-├── services/                   # use cases, one module per feature
-│   ├── identity.py
+├── repositories/               # database operations, one module per owning model
+│   ├── user.py                 # statements against users
+│   ├── shop.py                 # statements against shops
+│   ├── role.py                 # roles and permissions (read-only lookups)
+│   ├── membership.py           # memberships + the permission resolution
+│   └── refresh_token.py        # refresh token lifecycle
+├── services/                   # use cases
+│   ├── identity/               # one module per seam, composed by IdentityService
+│   │   ├── __init__.py         # the composite facade
+│   │   ├── auth.py             # register, login, refresh, logout, switch-shop
+│   │   ├── account.py          # the caller's own profile, avatar, deactivation
+│   │   ├── shop.py             # the active shop's profile and retirement
+│   │   └── session.py          # the Session result and issue_session
+│   ├── rate_limit.py           # cross-feature Redis limiter
 │   ├── media.py
 │   └── health.py
 ├── errors/                     # domain errors, one module per feature
@@ -329,9 +339,11 @@ src/ecom_be/
             └── shops.py        # the active shop's profile and background
 ```
 
-A layer file exists only when the feature has something to put in it:
-`repositories/identity.py` is the sole repository today, and `media` and `health`
-persist nothing, so they contribute no model, no repository, and no constants.
+A layer file exists only when the feature has something to put in it, and a layer
+that outgrows one file becomes a package of them: `services/identity/` is split by
+use-case seam, and `repositories/` is one module per owning model. `media` and
+`health` persist nothing, so they contribute no model, no repository, and no
+constants.
 
 ### Layer rules
 
@@ -341,11 +353,14 @@ persist nothing, so they contribute no model, no repository, and no constants.
 - **Services own use cases.** A `services/<feature>.py` holds the business
   decision — which repository calls happen, in what order, and what the outcome
   means. It is async and takes its collaborators through its constructor, so it
-  can be tested with fakes and without a database.
-- **Repositories own database operations.** A `repositories/<feature>.py` is the
-  only place that executes statements or builds queries against the session. It
-  takes a session (or a factory) in its constructor and never commits on its
-  own.
+  can be tested with fakes and without a database. A feature whose use cases span
+  several aggregates grows a `services/<feature>/` package with one module per
+  seam plus a composite facade that keeps a single entry point.
+- **Repositories own database operations.** `repositories/<model>.py` is the only
+  place that executes statements or builds queries against the session, one module
+  per owning model rather than per feature, so a table's statements have exactly
+  one home. Repositories take a session and never commit on their own; the
+  transaction boundary belongs to the service.
 - **`utils/<feature>.py` stays pure.** Deterministic helpers only: no I/O, no
   session, no `httpx`/`redis` client, no request object.
 - **All I/O is async.** Database access uses `AsyncSession`, Redis uses
@@ -357,9 +372,9 @@ persist nothing, so they contribute no model, no repository, and no constants.
 ### Wiring a new feature
 
 1. Add the layer files the feature needs: `models/<feature>.py`,
-   `repositories/<feature>.py`, `services/<feature>.py`, `errors/<feature>.py`,
-   `constants/<feature>.py`, `utils/<feature>.py`, `schemas/<feature>.py`, and a
-   router under `api/v1/`.
+   `repositories/<model>.py` (one per owning model), `services/<feature>.py`,
+   `errors/<feature>.py`, `constants/<feature>.py`, `utils/<feature>.py`,
+   `schemas/<feature>.py`, and a router under `api/v1/`.
 2. Register the router in `src/ecom_be/api/v1/__init__.py` with
    `api_router.include_router(...)`; that file only composes routers and adds no
    behavior of its own.

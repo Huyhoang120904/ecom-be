@@ -19,7 +19,11 @@ from ecom_be.errors.identity import (
     NotAMember,
     ShopNotAccessible,
 )
-from ecom_be.repositories import identity as repository
+from ecom_be.repositories import membership as membership_repository
+from ecom_be.repositories import refresh_token as refresh_token_repository
+from ecom_be.repositories import role as role_repository
+from ecom_be.repositories import shop as shop_repository
+from ecom_be.repositories import user as user_repository
 from ecom_be.services.identity import IdentityService
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
@@ -52,7 +56,9 @@ class TestRegister:
         assert len(session.permissions) == 9
         assert session.refresh_token
 
-        memberships = await repository.list_memberships(db_session, session.user.id)
+        memberships = await membership_repository.list_memberships(
+            db_session, session.user.id
+        )
         assert [role.key for _shop, role in memberships] == ["owner"]
 
     async def test_stores_a_hash_of_the_supplied_password_not_the_password(
@@ -60,7 +66,9 @@ class TestRegister:
     ):
         await _register(db_session)
 
-        stored = await repository.find_user_by_email(db_session, "owner@example.com")
+        stored = await user_repository.find_user_by_email(
+            db_session, "owner@example.com"
+        )
 
         assert stored is not None
         assert stored.password_hash.startswith("$argon2id$")
@@ -76,7 +84,7 @@ class TestRegister:
                 db_session, email="dup@example.com", shop_name="Second Shop"
             )
 
-        slugs = await repository.list_all_shop_slugs(db_session)
+        slugs = await shop_repository.list_all_shop_slugs(db_session)
         assert "second-shop" not in slugs
 
     async def test_the_access_token_identifies_the_new_shop(self, db_session):
@@ -162,7 +170,7 @@ class TestRefreshRotation:
         service = IdentityService(db_session)
         await service.refresh(first.refresh_token)
 
-        original = await repository.find_refresh_token(
+        original = await refresh_token_repository.find_refresh_token(
             db_session, hash_refresh_token(first.refresh_token)
         )
 
@@ -193,12 +201,15 @@ class TestRefreshRotation:
         with pytest.raises(InvalidToken):
             await service.refresh(first.refresh_token)
 
-        stored = await repository.find_refresh_token(
+        stored = await refresh_token_repository.find_refresh_token(
             db_session, hash_refresh_token(first.refresh_token)
         )
         assert stored is not None
         assert (
-            await repository.list_unrevoked_family(db_session, stored.family_id) == []
+            await refresh_token_repository.list_unrevoked_family(
+                db_session, stored.family_id
+            )
+            == []
         )
 
     async def test_an_unknown_token_is_refused(self, db_session):
@@ -220,7 +231,7 @@ class TestRefreshRotation:
 
         _service, first = await _register(db_session)
         raw, digest = new_refresh_token()
-        await repository.create_refresh_token(
+        await refresh_token_repository.create_refresh_token(
             db_session,
             user_id=first.user.id,
             active_shop_id=first.active_shop.id,
@@ -233,7 +244,9 @@ class TestRefreshRotation:
             await service.refresh(raw)
 
         assert (
-            await repository.find_refresh_token(db_session, hash_refresh_token(raw))
+            await refresh_token_repository.find_refresh_token(
+                db_session, hash_refresh_token(raw)
+            )
             is not None
         )
 
@@ -258,7 +271,7 @@ class TestLogout:
 class TestSwitchShop:
     async def test_a_non_member_shop_is_refused(self, db_session):
         _service, session = await _register(db_session)
-        other = await repository.create_shop(db_session, name="Someone Else")
+        other = await shop_repository.create_shop(db_session, name="Someone Else")
         service = IdentityService(db_session)
 
         with pytest.raises(NotAMember):
@@ -270,7 +283,7 @@ class TestSwitchShop:
 
     async def test_a_suspended_shop_is_not_accessible(self, db_session):
         _service, session = await _register(db_session)
-        await repository.set_shop_active(db_session, session.active_shop.id, False)
+        await shop_repository.set_shop_active(db_session, session.active_shop.id, False)
         service = IdentityService(db_session)
 
         with pytest.raises(ShopNotAccessible):
@@ -287,9 +300,9 @@ class TestSwitchShop:
         from ecom_be.utils.identity import decode_access_token
 
         _service, session = await _register(db_session)
-        second_shop = await repository.create_shop(db_session, name="Second Shop")
-        owner = await repository.get_owner_role(db_session)
-        await repository.create_membership(
+        second_shop = await shop_repository.create_shop(db_session, name="Second Shop")
+        owner = await role_repository.get_owner_role(db_session)
+        await membership_repository.create_membership(
             db_session,
             user_id=session.user.id,
             shop_id=second_shop.id,
@@ -329,7 +342,7 @@ class TestMe:
         self, db_session
     ):
         _service, session = await _register(db_session)
-        other = await repository.create_shop(db_session, name="Not Mine")
+        other = await shop_repository.create_shop(db_session, name="Not Mine")
         service = IdentityService(db_session)
 
         with pytest.raises(ShopNotAccessible):
@@ -337,7 +350,7 @@ class TestMe:
 
     async def test_a_deactivated_account_reports_itself_inactive(self, db_session):
         _service, session = await _register(db_session)
-        await repository.deactivate_user(db_session, session.user)
+        await user_repository.deactivate_user(db_session, session.user)
         service = IdentityService(db_session)
 
         from ecom_be.errors.identity import AccountInactive
@@ -384,7 +397,9 @@ class TestDeactivation:
                 user_id=session.user.id, password="not-the-password"
             )
 
-        unchanged = await repository.find_user_by_email(db_session, "owner@example.com")
+        unchanged = await user_repository.find_user_by_email(
+            db_session, "owner@example.com"
+        )
         assert unchanged is not None
         assert unchanged.deactivated_at is None
 
@@ -411,7 +426,9 @@ class TestDeactivation:
         service = IdentityService(db_session)
         await service.deactivate(user_id=session.user.id, password=PASSWORD)
 
-        stored = await repository.find_user_by_email(db_session, "owner@example.com")
+        stored = await user_repository.find_user_by_email(
+            db_session, "owner@example.com"
+        )
         assert stored is not None, "deactivation is not deletion"
         assert stored.deleted_at is None
 
@@ -455,7 +472,10 @@ class TestShops:
                 shop_id=session.active_shop.id, confirm_shop_name="Not The Name"
             )
 
-        assert await repository.get_shop(db_session, session.active_shop.id) is not None
+        assert (
+            await shop_repository.get_shop(db_session, session.active_shop.id)
+            is not None
+        )
 
     async def test_deleting_a_shop_soft_deletes_it_and_revokes_its_sessions(
         self, db_session
@@ -468,8 +488,13 @@ class TestShops:
             confirm_shop_name=session.active_shop.name,
         )
 
-        assert await repository.get_shop(db_session, session.active_shop.id) is None
-        assert await repository.list_memberships(db_session, session.user.id) == []
+        assert (
+            await shop_repository.get_shop(db_session, session.active_shop.id) is None
+        )
+        assert (
+            await membership_repository.list_memberships(db_session, session.user.id)
+            == []
+        )
         with pytest.raises(InvalidToken):
             await service.refresh(session.refresh_token)
 

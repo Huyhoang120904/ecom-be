@@ -41,8 +41,8 @@ src/ecom_be/
 ├── models/                     # ORM models, one module per feature
 │   └── __init__.py             # imports every model; the Alembic target_metadata
 ├── schemas/                    # transport shapes (common.py envelope, one file per feature)
-├── repositories/               # database operations, one module per feature
-├── services/                   # use cases, one module per feature
+├── repositories/               # database operations, one module per owning model
+├── services/                   # use cases, one module per feature or per seam
 ├── errors/                     # domain errors, one module per feature
 ├── constants/                  # contract bounds, one module per feature
 ├── utils/                      # pure helpers, one module per feature
@@ -60,12 +60,14 @@ the database engine. Repositories and routes never create their own clients.
 ## Feature layers
 
 A feature is a name that appears in whichever layers it needs. `identity` is the
-reference: `models/identity.py`, `repositories/identity.py`,
-`services/identity.py`, `errors/identity.py`, `constants/identity.py`,
-`utils/identity.py`, `schemas/identity.py`, and
+reference: `models/identity.py`, `repositories/{user,shop,role,membership,refresh_token}.py`,
+`services/identity/{auth,account,shop}.py`, `errors/identity.py`,
+`constants/identity.py`, `utils/identity.py`, `schemas/identity.py`, and
 `api/v1/identity/`. The paths are literal — a feature never invents another
 shape. Layers a feature has nothing for are simply absent (`media` and `health`
-persist nothing, so they have no model, repository, or constants).
+persist nothing, so they have no model, no repository, and no constants), and a
+feature that outgrows one file splits per owning model in `repositories/` or per
+use-case seam in `services/<feature>/`.
 
 ### Layer rules
 
@@ -75,11 +77,17 @@ persist nothing, so they have no model, repository, or constants).
   cookie, response mappers) stay in that router package's `common.py`.
 - **Services own use cases.** A service decides what happens: which repository
   calls run, in what order, and what the result means. Collaborators arrive
-  through the constructor so services are testable without a database.
-- **Repositories own database operations.** `repositories/<feature>.py` is the
-  only layer that executes statements. It receives a session and never commits
-  implicitly — one request-scoped session is yielded per request with no implicit
-  commit, so a use case decides transaction boundaries explicitly.
+  through the constructor so services are testable without a database. When a
+  feature's use cases span several aggregates, split them by seam
+  (`services/identity/{auth,account,shop}.py`) and keep a composite
+  `IdentityService` in the package `__init__.py` as the single entry point, so
+  routers and tests are not rewritten when a seam moves.
+- **Repositories own database operations, one module per owning model.**
+  `repositories/<model>.py` is the only layer that executes statements against
+  that table, so a table's SQL has exactly one home. It receives a session and
+  never commits implicitly — one request-scoped session is yielded per request
+  with no implicit commit, so a use case decides transaction boundaries
+  explicitly, and a use case that writes four tables still commits once.
 - **`utils/<feature>.py` is pure.** Deterministic helpers with no I/O, no
   session, no client, and no request object.
 - **All I/O is async.** `AsyncSession` for PostgreSQL, `redis.asyncio` for
@@ -92,7 +100,7 @@ persist nothing, so they have no model, repository, or constants).
 ### Adding a feature
 
 1. Add the layer files the feature needs, named for the feature, in each layer
-   directory above.
+   directory above — one repository module per owning model.
 2. Register the router from `src/ecom_be/api/v1/__init__.py`; that file only
    composes routers.
 3. Take the request-scoped session and the lifecycle-owned Redis client from

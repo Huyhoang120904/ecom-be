@@ -18,13 +18,15 @@ from ecom_be.api.v1.identity.common import _client_key, _me_data
 from ecom_be.api.v1.media import get_media_service
 from ecom_be.schemas.identity import MeEnvelope
 from ecom_be.services.identity import (
+    IdentityService,
+)
+from ecom_be.services.media import MediaService
+from ecom_be.services.rate_limit import (
     UPLOAD_LIMIT,
     UPLOAD_WINDOW_SECONDS,
-    IdentityService,
     RateLimitStore,
     enforce_rate_limit,
 )
-from ecom_be.services.media import MediaService
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 

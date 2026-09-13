@@ -18,7 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ecom_be.api.deps import get_application_db_session
 from ecom_be.errors.media import ImageNotFound
 from ecom_be.infrastructure.storage.local import LocalStorageBackend, StorageBackend
-from ecom_be.repositories import identity as repository
+from ecom_be.repositories import shop as shop_repository
+from ecom_be.repositories import user as user_repository
 from ecom_be.services.media import MediaService
 
 router = APIRouter(prefix="/api/v1/media", tags=["media"])
@@ -76,7 +77,7 @@ async def serve_avatar(
     deleted avatar is a 404 rather than a stale hit.
     """
 
-    user = await repository.get_user(session, user_id)
+    user = await user_repository.get_user(session, user_id)
     if user is None or not user.avatar_key:
         raise ImageNotFound
 
@@ -94,7 +95,7 @@ async def serve_shop_background(
     session: Annotated[AsyncSession, Depends(get_application_db_session)],
     media: Annotated[MediaService, Depends(get_media_service)],
 ) -> Response:
-    shop = await repository.get_shop(session, shop_id)
+    shop = await shop_repository.get_shop(session, shop_id)
     if shop is None or not shop.background_key:
         raise ImageNotFound
 
