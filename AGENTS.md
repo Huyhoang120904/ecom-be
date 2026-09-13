@@ -40,11 +40,11 @@ app/
 │   └── storage/local.py        # StorageBackend protocol + local adapter
 ├── models/                     # ORM models, one module per feature
 │   └── __init__.py             # imports every model; the Alembic target_metadata
-├── schemas/                    # transport shapes (common.py BaseResponse, one file per feature)
+├── schemas/                    # transport shapes (common.py BaseResponse, one module per flow)
 ├── repositories/               # database operations, one module per owning model
 ├── services/                   # use cases, one module per service
 ├── errors/                     # domain errors, one module per feature
-├── constants/                  # contract bounds, one module per feature
+├── constants/                  # contract bounds, grouped by the subject they bound
 ├── utils/                      # pure helpers, one module per feature
 └── api/                        # HTTP transport
     ├── deps.py                 # shared dependencies, guards, health probes
@@ -62,12 +62,25 @@ the database engine. Repositories and routes never create their own clients.
 A feature is a name that appears in whichever layers it needs. `identity` is the
 reference: `models/identity.py`, `repositories/{user,shop,role,membership,refresh_token}_repository.py`,
 `services/{identity,auth,account,shop,session}_service.py`, `errors/identity.py`,
-`constants/identity.py`, `utils/identity.py`, `schemas/identity.py`, and
+`constants/identity/{account,shop,rbac,media}.py`, `utils/identity.py`,
+`schemas/identity/{common,auth,profile,shop}.py`, and
 `api/v1/identity/`. The names are literal — a feature never invents another
 shape. Layers a feature has nothing for are simply absent (`media` and `health`
 persist nothing, so they have no model, no repository, and no constants), and a
-feature that outgrows one module splits per owning model in `repositories/` or
-per use-case seam in `services/`.
+feature that outgrows one module splits per owning model in `repositories/`, per
+use-case seam in `services/`, per flow in `schemas/`, or per subject in
+`constants/`.
+
+Schema module names follow the router's flow names, so `schemas/identity/shop.py`
+belongs to the flow `api/v1/identity/shops.py` serves. Constants are grouped by the
+subject they bound instead, because a bound is not a flow: `EMAIL_MAX` governs both
+registration and a shop's contact address, and the role and permission bounds belong
+to no flow at all.
+
+Both packages re-export their contents from `__init__.py` with an explicit
+`__all__` (`no_implicit_reexport` makes an unlisted re-export a type error), so a
+caller writes `from app.schemas.identity import MeData` and never needs to know
+which flow module a model lives in.
 
 ### The response envelope
 

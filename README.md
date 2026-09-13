@@ -302,9 +302,13 @@ app/
 ├── models/                     # ORM models, one module per feature
 │   ├── __init__.py             # imports every model; the Alembic target_metadata
 │   └── identity.py             # users, shops, roles, permissions, memberships, tokens
-├── schemas/                    # pydantic transport shapes, one module per feature
+├── schemas/                    # pydantic transport shapes
 │   ├── common.py               # the BaseResponse envelope
-│   ├── identity.py             # request and response models
+│   ├── identity/               # one module per flow, named as api/v1/identity/
+│   │   ├── common.py           # shapes no single flow owns (roles, memberships)
+│   │   ├── auth.py             # register/login payloads + SessionData
+│   │   ├── profile.py          # profile requests + MeData + UserData
+│   │   └── shop.py             # shop requests + ShopData
 │   └── health.py
 ├── repositories/               # database operations, one module per owning model
 │   ├── user_repository.py      # statements against users
@@ -324,8 +328,8 @@ app/
 ├── errors/                     # domain errors, one module per feature
 │   ├── identity.py
 │   └── media.py
-├── constants/                  # contract bounds, one module per feature
-│   └── identity.py
+├── constants/                  # contract bounds, grouped by the subject they bound
+│   └── identity/{account,shop,rbac,media}.py
 ├── utils/                      # pure helpers, one module per feature
 │   ├── identity.py
 │   ├── media.py
@@ -378,15 +382,20 @@ per-endpoint envelope subclass: one class carries `status_code`, `message`, and
 - **All I/O is async.** Database access uses `AsyncSession`, Redis uses
   `redis.asyncio`, and outbound HTTP uses an async client. A synchronous driver
   call inside a coroutine blocks the event loop and is treated as a defect.
-- **Schemas are transport types.** A `schemas/<feature>.py` defines the API
-  boundary; ORM models stay out of responses and are mapped explicitly.
+- **Schemas are transport types.** A `schemas/<feature>.py` or
+  `schemas/<feature>/` package defines the API boundary; ORM models stay out of
+  responses and are mapped explicitly. A feature with several router flows splits
+  its schemas with the same flow names, so a flow's requests and payloads sit beside
+  the routes that use them, and a `common` module holds what more than one flow
+  embeds.
 
 ### Wiring a new feature
 
 1. Add the layer files the feature needs: `models/<feature>.py`,
    `repositories/<model>_repository.py` (one per owning model),
    `services/<name>_service.py`, `errors/<feature>.py`, `constants/<feature>.py`,
-   `utils/<feature>.py`, `schemas/<feature>.py`, and a router under `api/v1/`.
+   `utils/<feature>.py`, `schemas/<feature>.py` (or `schemas/<feature>/`, one
+   module per flow), and a router under `api/v1/`.
 2. Register the router in `app/api/v1/__init__.py` with
    `api_router.include_router(...)`; that file only composes routers and adds no
    behavior of its own.
