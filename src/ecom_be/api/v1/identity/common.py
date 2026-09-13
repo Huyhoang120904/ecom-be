@@ -12,7 +12,7 @@ from fastapi import Request, Response
 
 from ecom_be.api.media_urls import avatar_url, background_url
 from ecom_be.models.identity import Role, Shop, User
-from ecom_be.schemas.identity.response import (
+from ecom_be.schemas.identity import (
     MeData,
     MembershipData,
     RoleData,

@@ -20,7 +20,7 @@ class AppError(Exception):
     exception detail to a client is forbidden.
 
     Subclasses live in the module that owns the meaning, because ``core`` must not
-    import a feature module. ``modules/identity/errors.py`` is the reference.
+    import a feature module. ``errors/identity.py`` is the reference.
     """
 
     code: str = "internal_server_error"

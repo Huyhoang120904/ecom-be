@@ -11,8 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ecom_be.api.deps import get_application_db_session, get_current_principal
 from ecom_be.api.principal import Principal
 from ecom_be.api.v1.identity.common import _me_data
-from ecom_be.schemas.identity.request import DeactivateRequest, ProfileUpdateRequest
-from ecom_be.schemas.identity.response import MeEnvelope
+from ecom_be.schemas.identity import DeactivateRequest, MeEnvelope, ProfileUpdateRequest
 from ecom_be.services.identity import IdentityService
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])

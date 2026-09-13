@@ -293,10 +293,10 @@ src/ecom_be/
 ├── models/                     # ORM models, one module per feature
 │   ├── __init__.py             # imports every model; the Alembic target_metadata
 │   └── identity.py             # users, shops, roles, permissions, memberships, tokens
-├── schemas/                    # pydantic transport shapes
+├── schemas/                    # pydantic transport shapes, one module per feature
 │   ├── common.py               # the BaseResponse envelope
-│   ├── identity/{request,response}.py
-│   └── health/response.py
+│   ├── identity.py             # request and response models
+│   └── health.py
 ├── repositories/               # database operations, one module per feature
 │   └── identity.py
 ├── services/                   # use cases, one module per feature
@@ -351,16 +351,15 @@ persist nothing, so they contribute no model, no repository, and no constants.
 - **All I/O is async.** Database access uses `AsyncSession`, Redis uses
   `redis.asyncio`, and outbound HTTP uses an async client. A synchronous driver
   call inside a coroutine blocks the event loop and is treated as a defect.
-- **Schemas are transport types.** `schemas/<feature>/request.py` and
-  `response.py` define the API boundary; ORM models stay out of responses and are
-  mapped explicitly.
+- **Schemas are transport types.** A `schemas/<feature>.py` defines the API
+  boundary; ORM models stay out of responses and are mapped explicitly.
 
 ### Wiring a new feature
 
 1. Add the layer files the feature needs: `models/<feature>.py`,
    `repositories/<feature>.py`, `services/<feature>.py`, `errors/<feature>.py`,
-   `constants/<feature>.py`, `utils/<feature>.py`,
-   `schemas/<feature>/{request,response}.py`, and a router under `api/v1/`.
+   `constants/<feature>.py`, `utils/<feature>.py`, `schemas/<feature>.py`, and a
+   router under `api/v1/`.
 2. Register the router in `src/ecom_be/api/v1/__init__.py` with
    `api_router.include_router(...)`; that file only composes routers and adds no
    behavior of its own.

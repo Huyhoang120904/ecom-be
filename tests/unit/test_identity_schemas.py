@@ -10,19 +10,17 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from ecom_be.schemas.identity.request import (
+from ecom_be.schemas.identity import (
     DeactivateRequest,
     DeleteShopRequest,
     LoginRequest,
+    MeEnvelope,
     ProfileUpdateRequest,
     RegisterRequest,
-    ShopUpdateRequest,
-    SwitchShopRequest,
-)
-from ecom_be.schemas.identity.response import (
-    MeEnvelope,
     SessionEnvelope,
     ShopEnvelope,
+    ShopUpdateRequest,
+    SwitchShopRequest,
 )
 
 VALID_PASSWORD = "a-perfectly-fine-password"

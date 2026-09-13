@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Response, status
 
 from ecom_be.api.deps import Probe, get_database_probe, get_redis_probe
 from ecom_be.config.settings import Settings, get_settings
-from ecom_be.schemas.health.response import LivenessEnvelope, ReadinessEnvelope
+from ecom_be.schemas.health import LivenessEnvelope, ReadinessEnvelope
 from ecom_be.services.health import HealthService
 
 router = APIRouter(prefix="/health", tags=["health"])

@@ -16,7 +16,7 @@ from ecom_be.api.deps import (
 from ecom_be.api.principal import Principal
 from ecom_be.api.v1.identity.common import _client_key, _me_data
 from ecom_be.api.v1.media import get_media_service
-from ecom_be.schemas.identity.response import MeEnvelope
+from ecom_be.schemas.identity import MeEnvelope
 from ecom_be.services.identity import (
     UPLOAD_LIMIT,
     UPLOAD_WINDOW_SECONDS,

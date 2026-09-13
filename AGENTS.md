@@ -40,7 +40,7 @@ src/ecom_be/
 │   └── storage/local.py        # StorageBackend protocol + local adapter
 ├── models/                     # ORM models, one module per feature
 │   └── __init__.py             # imports every model; the Alembic target_metadata
-├── schemas/                    # transport shapes (common.py envelope, per feature)
+├── schemas/                    # transport shapes (common.py envelope, one file per feature)
 ├── repositories/               # database operations, one module per feature
 ├── services/                   # use cases, one module per feature
 ├── errors/                     # domain errors, one module per feature
@@ -62,7 +62,7 @@ the database engine. Repositories and routes never create their own clients.
 A feature is a name that appears in whichever layers it needs. `identity` is the
 reference: `models/identity.py`, `repositories/identity.py`,
 `services/identity.py`, `errors/identity.py`, `constants/identity.py`,
-`utils/identity.py`, `schemas/identity/{request,response}.py`, and
+`utils/identity.py`, `schemas/identity.py`, and
 `api/v1/identity/`. The paths are literal — a feature never invents another
 shape. Layers a feature has nothing for are simply absent (`media` and `health`
 persist nothing, so they have no model, repository, or constants).
@@ -86,7 +86,7 @@ persist nothing, so they have no model, repository, or constants).
   Redis, an async HTTP client for outbound calls. Blocking the event loop from a
   coroutine is a defect, not a style preference.
 - **Schemas define the API boundary.** ORM models are never returned directly;
-  `schemas/<feature>/response.py` models are the contract and are what
+  `schemas/<feature>.py` models are the contract and are what
   `/api/v1/openapi.json` publishes.
 
 ### Adding a feature

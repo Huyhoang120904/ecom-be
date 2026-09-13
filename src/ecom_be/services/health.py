@@ -3,7 +3,7 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from ecom_be.config.settings import Settings, get_settings
-from ecom_be.schemas.health.response import (
+from ecom_be.schemas.health import (
     DependencyName,
     DependencyStatus,
     LivenessResponse,

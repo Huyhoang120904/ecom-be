@@ -21,12 +21,12 @@ from ecom_be.api.v1.identity.common import (
     _session_data,
     _set_refresh_cookie,
 )
-from ecom_be.schemas.identity.request import (
+from ecom_be.schemas.identity import (
     LoginRequest,
     RegisterRequest,
+    SessionEnvelope,
     SwitchShopRequest,
 )
-from ecom_be.schemas.identity.response import SessionEnvelope
 from ecom_be.services.identity import (
     LOGIN_LIMIT,
     LOGIN_WINDOW_SECONDS,
