@@ -107,33 +107,46 @@ async def db_engine() -> AsyncIterator[object]:
 
 
 @pytest.fixture
-async def db_session(db_engine) -> AsyncIterator[AsyncSession]:
-    """A session wrapped in a transaction that is always rolled back.
+async def db_transaction(db_engine):
+    """One connection and one transaction, shared by every database fixture.
 
-    Each test starts from the same schema and leaves nothing behind, so the
-    ``db``-marked tests do not depend on each other's rows or on their order.
+    This exists so ``db_session`` and ``db_async_client`` can be requested together.
+    With two independently-connected fixtures the test and the application under test
+    would be looking at different transactions: the endpoint's write would be
+    invisible to the test's own reads, and a test that asserts on both (demote a role,
+    then call an endpoint, then check the result) would fail for a reason that has
+    nothing to do with the code under test.
     """
 
     connection = await db_engine.connect()
     transaction = await connection.begin()
-    factory = async_sessionmaker(bind=connection, expire_on_commit=False)
-    session = factory()
     try:
-        yield session
+        yield connection
     finally:
-        await session.close()
         await transaction.rollback()
         await connection.close()
 
 
 @pytest.fixture
-async def db_async_client(db_engine, tmp_path) -> AsyncIterator[AsyncClient]:
-    """An HTTP client whose application shares a transaction and skips rate limiting.
+async def db_session(db_transaction) -> AsyncIterator[AsyncSession]:
+    """A session inside the shared transaction, so it sees the endpoint's writes."""
+
+    factory = async_sessionmaker(bind=db_transaction, expire_on_commit=False)
+    session = factory()
+    try:
+        yield session
+    finally:
+        await session.close()
+
+
+@pytest.fixture
+async def db_async_client(db_transaction, tmp_path) -> AsyncIterator[AsyncClient]:
+    """An HTTP client on the same transaction, with rate limiting and storage stubbed.
 
     Three overrides, for three different reasons:
 
-    * The session, so the endpoint writes through the same connection the test reads
-      from and therefore sees its own data rather than a stale snapshot.
+    * The session, bound to the shared transaction, so the endpoint writes through the
+      same connection the test reads from.
     * The Redis client for rate limiting, because a shared counter in a real Redis is
       cross-test state: enough logins across a suite trip the limit and later tests
       start failing with a 429 that has nothing to do with what they assert.
@@ -147,10 +160,7 @@ async def db_async_client(db_engine, tmp_path) -> AsyncIterator[AsyncClient]:
     from ecom_be.modules.media.router import get_storage
     from ecom_be.modules.media.storage import LocalStorageBackend
 
-    engine = create_async_engine(_migrated_database_url(), pool_pre_ping=True)
-    connection = await engine.connect()
-    transaction = await connection.begin()
-    factory = async_sessionmaker(bind=connection, expire_on_commit=False)
+    factory = async_sessionmaker(bind=db_transaction, expire_on_commit=False)
 
     async def override_session() -> AsyncIterator[AsyncSession]:
         async with factory() as session:
@@ -173,6 +183,3 @@ async def db_async_client(db_engine, tmp_path) -> AsyncIterator[AsyncClient]:
         app.dependency_overrides.pop(get_application_db_session, None)
         app.dependency_overrides.pop(get_optional_redis_client, None)
         app.dependency_overrides.pop(get_storage, None)
-        await transaction.rollback()
-        await connection.close()
-        await engine.dispose()
