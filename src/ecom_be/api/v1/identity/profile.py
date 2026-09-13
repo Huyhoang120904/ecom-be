@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ecom_be.api.deps import get_application_db_session, get_current_principal
 from ecom_be.api.principal import Principal
-from ecom_be.api.v1.identity.common import _me_data, me_response
+from ecom_be.api.v1.identity.common import _me_data
 from ecom_be.schemas.common import BaseResponse
 from ecom_be.schemas.identity import (
     DeactivateRequest,
@@ -33,7 +33,10 @@ async def me(
         user_id=uuid.UUID(principal.user_id),
         shop_id=uuid.UUID(principal.active_shop_id),
     )
-    return me_response(_me_data(user, shop, memberships, permissions, request))
+    return BaseResponse[MeData](
+        status_code=status.HTTP_200_OK,
+        data=_me_data(user, shop, memberships, permissions, request),
+    )
 
 
 @router.patch("/me", response_model=BaseResponse[MeData])
@@ -52,7 +55,10 @@ async def update_profile(
         user_id=uuid.UUID(principal.user_id),
         shop_id=uuid.UUID(principal.active_shop_id),
     )
-    return me_response(_me_data(user, shop, memberships, permissions, request))
+    return BaseResponse[MeData](
+        status_code=status.HTTP_200_OK,
+        data=_me_data(user, shop, memberships, permissions, request),
+    )
 
 
 @router.post("/deactivate", status_code=status.HTTP_204_NO_CONTENT)

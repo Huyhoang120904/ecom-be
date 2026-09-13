@@ -14,7 +14,7 @@ from ecom_be.api.deps import (
     get_optional_redis_client,
 )
 from ecom_be.api.principal import Principal
-from ecom_be.api.v1.identity.common import _client_key, _me_data, me_response
+from ecom_be.api.v1.identity.common import _client_key, _me_data
 from ecom_be.api.v1.media import get_media_service
 from ecom_be.schemas.common import BaseResponse
 from ecom_be.schemas.identity import MeData
@@ -65,7 +65,10 @@ async def upload_avatar(
         user_id=uuid.UUID(principal.user_id),
         shop_id=uuid.UUID(principal.active_shop_id),
     )
-    return me_response(_me_data(user, shop, memberships, permissions, request))
+    return BaseResponse[MeData](
+        status_code=status.HTTP_200_OK,
+        data=_me_data(user, shop, memberships, permissions, request),
+    )
 
 
 @router.delete("/me/avatar", status_code=status.HTTP_204_NO_CONTENT)

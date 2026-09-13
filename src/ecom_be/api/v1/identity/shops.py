@@ -14,7 +14,7 @@ from ecom_be.api.deps import (
     require_permissions,
 )
 from ecom_be.api.principal import Principal
-from ecom_be.api.v1.identity.common import _client_key, _shop_data, shop_response
+from ecom_be.api.v1.identity.common import _client_key, _shop_data
 from ecom_be.api.v1.media import get_media_service
 from ecom_be.schemas.common import BaseResponse
 from ecom_be.schemas.identity import DeleteShopRequest, ShopData, ShopUpdateRequest
@@ -54,7 +54,10 @@ async def upload_background(
     shop = await ShopService(session).set_shop_background(
         shop_id=uuid.UUID(principal.active_shop_id), key=key
     )
-    return shop_response(_shop_data(shop, request))
+    return BaseResponse[ShopData](
+        status_code=status.HTTP_200_OK,
+        data=_shop_data(shop, request),
+    )
 
 
 @shops_router.delete("/active/background", status_code=status.HTTP_204_NO_CONTENT)
@@ -84,7 +87,10 @@ async def update_active_shop(
     shop = await service.update_active_shop(
         shop_id=uuid.UUID(principal.active_shop_id), changes=changes
     )
-    return shop_response(_shop_data(shop, request))
+    return BaseResponse[ShopData](
+        status_code=status.HTTP_200_OK,
+        data=_shop_data(shop, request),
+    )
 
 
 @shops_router.delete("/active", status_code=status.HTTP_204_NO_CONTENT)

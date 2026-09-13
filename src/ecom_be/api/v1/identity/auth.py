@@ -20,7 +20,6 @@ from ecom_be.api.v1.identity.common import (
     _client_key,
     _session_data,
     _set_refresh_cookie,
-    session_response,
 )
 from ecom_be.schemas.common import BaseResponse
 from ecom_be.schemas.identity import (
@@ -74,7 +73,10 @@ async def register(
         result.refresh_token,
         request.app.state.settings.refresh_token_ttl_seconds,
     )
-    return session_response(_session_data(result, request))
+    return BaseResponse[SessionData](
+        status_code=status.HTTP_201_CREATED,
+        data=_session_data(result, request),
+    )
 
 
 @router.post("/login", response_model=BaseResponse[SessionData])
@@ -100,7 +102,10 @@ async def login(
         result.refresh_token,
         request.app.state.settings.refresh_token_ttl_seconds,
     )
-    return session_response(_session_data(result, request))
+    return BaseResponse[SessionData](
+        status_code=status.HTTP_200_OK,
+        data=_session_data(result, request),
+    )
 
 
 @router.post("/refresh", response_model=BaseResponse[SessionData])
@@ -118,7 +123,10 @@ async def refresh(
         result.refresh_token,
         request.app.state.settings.refresh_token_ttl_seconds,
     )
-    return session_response(_session_data(result, request))
+    return BaseResponse[SessionData](
+        status_code=status.HTTP_200_OK,
+        data=_session_data(result, request),
+    )
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -152,4 +160,7 @@ async def switch_shop(
         result.refresh_token,
         request.app.state.settings.refresh_token_ttl_seconds,
     )
-    return session_response(_session_data(result, request))
+    return BaseResponse[SessionData](
+        status_code=status.HTTP_200_OK,
+        data=_session_data(result, request),
+    )
