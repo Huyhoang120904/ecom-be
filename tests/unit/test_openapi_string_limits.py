@@ -34,6 +34,11 @@ FRAMEWORK_SCHEMAS = frozenset({"HTTPValidationError", "ValidationError"})
 # A property carrying any of these is bounded by something other than maxLength.
 BOUNDED_OTHERWISE = ("format", "enum", "const")
 
+# FastAPI documents a multipart file part as a string property named ``file``. The
+# bound on an upload is a byte measurement enforced in the image pipeline, not a
+# ``maxLength``, so the gate cannot see it here and should not pretend to.
+FRAMEWORK_BODY_SCHEMA_PREFIX = "Body_"
+
 
 @pytest.fixture(scope="module")
 def document() -> dict[str, Any]:
@@ -85,6 +90,10 @@ def _unbounded_string_properties(document: dict[str, Any]) -> list[str]:
 
     for schema_name, schema in sorted(schemas.items()):
         if schema_name in FRAMEWORK_SCHEMAS:
+            continue
+        if schema_name.startswith(FRAMEWORK_BODY_SCHEMA_PREFIX):
+            # A generated multipart body: its ``file`` part is an upload bounded by
+            # bytes, not by a string length. See the module docstring.
             continue
         for path, subschema in _iter_subschemas(schema, document):
             if subschema.get("type") != "string":

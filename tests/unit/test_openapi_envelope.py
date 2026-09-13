@@ -21,6 +21,16 @@ from ecom_be.main import app
 METHODS = ("get", "post", "put", "patch", "delete", "head", "options")
 ENVELOPE_SUFFIX = "Envelope"
 
+# These responses carry a binary body, not JSON, so there is nothing to wrap. They
+# are listed by path rather than matched by a rule, because "this endpoint streams
+# bytes" is a property of the endpoint and not a pattern worth inferring.
+BINARY_PATHS = frozenset(
+    {
+        "/api/v1/media/avatar/{user_id}.webp",
+        "/api/v1/media/shop-background/{shop_id}.webp",
+    }
+)
+
 
 @pytest.fixture(scope="module")
 def document() -> dict[str, Any]:
@@ -32,6 +42,8 @@ def _bodyful_2xx_responses(document: dict[str, Any]) -> list[tuple[str, str, Any
 
     found: list[tuple[str, str, Any]] = []
     for path, operations in sorted(document.get("paths", {}).items()):
+        if path in BINARY_PATHS:
+            continue
         for method, operation in operations.items():
             if method not in METHODS or not isinstance(operation, dict):
                 continue

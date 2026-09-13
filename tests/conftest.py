@@ -127,10 +127,10 @@ async def db_session(db_engine) -> AsyncIterator[AsyncSession]:
 
 
 @pytest.fixture
-async def db_async_client(db_engine) -> AsyncIterator[AsyncClient]:
+async def db_async_client(db_engine, tmp_path) -> AsyncIterator[AsyncClient]:
     """An HTTP client whose application shares a transaction and skips rate limiting.
 
-    Two overrides, for two different reasons:
+    Three overrides, for three different reasons:
 
     * The session, so the endpoint writes through the same connection the test reads
       from and therefore sees its own data rather than a stale snapshot.
@@ -138,10 +138,14 @@ async def db_async_client(db_engine) -> AsyncIterator[AsyncClient]:
       cross-test state: enough logins across a suite trip the limit and later tests
       start failing with a 429 that has nothing to do with what they assert.
       ``None`` means "no limiting", which the limiter already treats as fail-open.
+    * Storage, rooted at a temporary directory, so a test upload never writes into the
+      developer's real ``.media`` tree and leaves nothing behind.
     """
 
     from ecom_be.api.deps import get_application_db_session, get_optional_redis_client
     from ecom_be.main import app
+    from ecom_be.modules.media.router import get_storage
+    from ecom_be.modules.media.storage import LocalStorageBackend
 
     engine = create_async_engine(_migrated_database_url(), pool_pre_ping=True)
     connection = await engine.connect()
@@ -155,8 +159,12 @@ async def db_async_client(db_engine) -> AsyncIterator[AsyncClient]:
     async def no_redis():
         return None
 
+    def temp_storage() -> LocalStorageBackend:
+        return LocalStorageBackend(root=tmp_path / "media")
+
     app.dependency_overrides[get_application_db_session] = override_session
     app.dependency_overrides[get_optional_redis_client] = no_redis
+    app.dependency_overrides[get_storage] = temp_storage
     transport = ASGITransport(app=app)
     try:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -164,6 +172,7 @@ async def db_async_client(db_engine) -> AsyncIterator[AsyncClient]:
     finally:
         app.dependency_overrides.pop(get_application_db_session, None)
         app.dependency_overrides.pop(get_optional_redis_client, None)
+        app.dependency_overrides.pop(get_storage, None)
         await transaction.rollback()
         await connection.close()
         await engine.dispose()
