@@ -3,7 +3,7 @@ import pytest
 
 @pytest.mark.anyio
 async def test_app_lifecycle_owns_and_closes_one_redis_client(monkeypatch):
-    import ecom_be.main as main_module
+    import app.main as main_module
 
     class FakeRedisClient:
         close_calls = 0
@@ -44,7 +44,7 @@ async def test_app_lifecycle_owns_and_closes_one_redis_client(monkeypatch):
 
 @pytest.mark.anyio
 async def test_app_lifecycle_disposes_database_when_redis_close_raises(monkeypatch):
-    import ecom_be.main as main_module
+    import app.main as main_module
 
     redis_close_error = RuntimeError("redis close failed")
 

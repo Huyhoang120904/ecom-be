@@ -32,7 +32,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project
 
 COPY uv.lock pyproject.toml README.md ./
-COPY src ./src
+COPY app ./app
 
 # Install the project itself, non-editable, from the locked environment.
 RUN --mount=type=cache,target=/root/.cache/uv \
@@ -67,4 +67,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3).read()"
 
-CMD ["uvicorn", "ecom_be.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

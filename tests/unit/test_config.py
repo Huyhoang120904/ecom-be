@@ -23,7 +23,7 @@ def test_settings_read_database_and_redis_urls(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", _database_url_value())
     monkeypatch.setenv("REDIS_URL", _redis_url_value())
 
-    from ecom_be.core.config import Settings
+    from app.config.settings import Settings
 
     settings = Settings()
 
@@ -46,7 +46,7 @@ def test_jwt_secret_is_required(monkeypatch, tmp_path):
 
     from pydantic import ValidationError
 
-    from ecom_be.core.config import Settings
+    from app.config.settings import Settings
 
     with pytest.raises(ValidationError) as excinfo:
         Settings()
@@ -63,7 +63,7 @@ def test_jwt_secret_must_be_long_enough(monkeypatch):
 
     from pydantic import ValidationError
 
-    from ecom_be.core.config import Settings
+    from app.config.settings import Settings
 
     with pytest.raises(ValidationError) as excinfo:
         Settings()
@@ -72,7 +72,7 @@ def test_jwt_secret_must_be_long_enough(monkeypatch):
 
 
 def test_jwt_secret_at_the_minimum_length_is_accepted(monkeypatch):
-    from ecom_be.core.config import Settings
+    from app.config.settings import Settings
 
     monkeypatch.setenv("DATABASE_URL", _database_url_value())
     monkeypatch.setenv("REDIS_URL", _redis_url_value())
@@ -82,7 +82,7 @@ def test_jwt_secret_at_the_minimum_length_is_accepted(monkeypatch):
 
 
 def test_token_ttls_and_media_settings_have_documented_defaults(monkeypatch):
-    from ecom_be.core.config import Settings
+    from app.config.settings import Settings
 
     monkeypatch.setenv("DATABASE_URL", _database_url_value())
     monkeypatch.setenv("REDIS_URL", _redis_url_value())
@@ -123,7 +123,7 @@ def test_settings_read_application_and_cors_values(monkeypatch):
         '["http://localhost:3000", "https://shop.example.com"]',
     )
 
-    from ecom_be.core.config import Settings
+    from app.config.settings import Settings
 
     settings = Settings()
 
@@ -139,7 +139,7 @@ def test_get_settings_returns_cached_instance(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", _database_url_value())
     monkeypatch.setenv("REDIS_URL", _redis_url_value())
 
-    from ecom_be.core.config import get_settings
+    from app.config.settings import get_settings
 
     get_settings.cache_clear()
     first = get_settings()

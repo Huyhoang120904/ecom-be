@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pytest
 
-from ecom_be.modules.identity.errors import RateLimited
-from ecom_be.modules.identity.services import enforce_rate_limit
+from app.errors.identity import RateLimited
+from app.services.rate_limit_service import enforce_rate_limit
 
 pytestmark = pytest.mark.anyio
 

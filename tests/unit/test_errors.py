@@ -11,7 +11,7 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from httpx import ASGITransport, AsyncClient
 
-from ecom_be.core.errors import AppError, register_exception_handlers
+from app.core.errors import AppError, register_exception_handlers
 
 
 class ProbeTeapot(AppError):

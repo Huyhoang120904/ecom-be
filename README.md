@@ -116,7 +116,7 @@ startup and application startup stay independent.
 | Apply migrations | `uv run alembic upgrade head` |
 | Show the current revision | `uv run alembic current` |
 | Create a migration | `uv run alembic revision --autogenerate -m "add order table"` |
-| Start the dev server | `uv run uvicorn ecom_be.main:app --reload --port 8000` |
+| Start the dev server | `uv run uvicorn app.main:app --reload --port 8000` |
 
 Formatting, linting, and type-check rules live in `pyproject.toml`
 (`[tool.ruff]`, `[tool.mypy]`, `[tool.pytest.ini_options]`) and are the same
@@ -151,23 +151,23 @@ Autogenerate compares the live database against a single named aggregation
 point:
 
 ```
-src/ecom_be/infrastructure/db/models.py
+app/models/__init__.py
 ```
 
-That module imports the shared declarative `Base` and every module's ORM
-models, and exports the resulting `metadata` object, which is what
-`alembic/env.py` assigns to `target_metadata`. A model class that is not
-imported there is invisible to autogenerate.
+That module imports the shared declarative `Base` and every model module, and
+exports the resulting `metadata` object, which is what `alembic/env.py` assigns
+to `target_metadata`. A model class that is not imported there is invisible to
+autogenerate.
 
 The scaffold ships two revisions: an identity schema (accounts, shops, roles,
 permissions, memberships, refresh tokens) and a seed that installs the permission
-vocabulary and the three system roles. Adding a persisted module means:
+vocabulary and the three system roles. Adding a persisted feature means:
 
-1. Write `modules/<module_name>/models.py`, declaring the model on
-   `ecom_be.infrastructure.db.base.Base` and taking the mixins from
-   `ecom_be.infrastructure.db.mixins` for the id and timestamp columns.
-2. Import that model class in `src/ecom_be/infrastructure/db/models.py` and add
-   its name to that file's `__all__`.
+1. Write `app/models/<feature>.py`, declaring the model on
+   `app.infrastructure.db.base.Base` and taking the mixins from
+   `app.infrastructure.db.mixins` for the id and timestamp columns.
+2. Import that model class in `app/models/__init__.py` and add its name
+   to that file's `__all__`.
 3. `uv run alembic revision --autogenerate -m "<change>"`, then **review the
    file by hand**, then `uv run alembic upgrade head`.
 
@@ -177,9 +177,9 @@ it cannot infer a partial index predicate you did not express in the model. The
 identity revision therefore carries a hand-added `CREATE EXTENSION IF NOT EXISTS
 citext` and hand-reviewed constraints.
 
-`tests/unit/test_migration_metadata.py` fails if a module ships a `models.py`
-that the aggregation point does not import, so this step cannot be forgotten
-silently.
+`tests/unit/test_migration_metadata.py` fails if a model module in
+`app/models/` is not imported by the aggregation view, so this step cannot
+be forgotten silently.
 
 `alembic/versions/` is tracked through a `.gitkeep` so revisions have a home.
 
@@ -189,7 +189,7 @@ The OpenAPI document is served at `/api/v1/openapi.json` and is the single
 source of truth for clients. Frontends generate their types from it:
 
 ```bash
-uv run uvicorn ecom_be.main:app --host 127.0.0.1 --port 8000 &
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8000 &
 curl --fail http://127.0.0.1:8000/api/v1/openapi.json -o openapi.json
 ```
 
@@ -225,13 +225,22 @@ other route requires a bearer token.
 | `GET /api/v1/media/avatar/{user_id}.webp` | public | Serve an avatar |
 | `GET /api/v1/media/shop-background/{shop_id}.webp` | public | Serve a shop background |
 
-Every `2xx` response with a body is wrapped: `{"data": {...}}`. Errors are never
+Every `2xx` response with a body is wrapped in `BaseResponse`:
+
+```json
+{ "status_code": 201, "message": "Success", "data": { "...": "..." } }
+```
+
+`status_code` echoes the HTTP status on the response, so a client can read the
+outcome from the body it already has; `header` is authoritative if the two ever
+disagreed. The shape is identical at every status, including the readiness route's
+`503`, so the unwrap is unconditional. Errors are never
 wrapped, and keep the `{"error": "<stable_code>", "message": "<safe text>"}`
 shape. Internal exception details never reach a client, and logs are JSON with
 credentials redacted before any handler sees them.
 
 Two mechanical gates hold the contract to that: a string property with no
-`maxLength` and a `2xx` body that is not a `BaseResponse` subclass both fail the
+`maxLength` and a `2xx` body that is not a `BaseResponse` both fail the
 suite.
 
 ## Media
@@ -246,9 +255,9 @@ rather than a duplicate, and the URL is versioned by that digest so a replaced
 image is never served from a cache.
 
 Storage is a local directory (`MEDIA_ROOT`, default `.media/`, gitignored) behind
-the `StorageBackend` protocol in `modules/media/storage.py`. That protocol is the
-single swap point for object storage. **Mount `MEDIA_ROOT` as a volume**: a local
-directory inside a container does not survive a redeploy.
+the `StorageBackend` protocol in `app/infrastructure/storage/local.py`.
+That protocol is the single swap point for object storage. **Mount `MEDIA_ROOT`
+as a volume**: a local directory inside a container does not survive a redeploy.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
@@ -271,66 +280,132 @@ directory inside a container does not survive a redeploy.
 | `ACCESS_TOKEN_TTL_SECONDS` | no | `900` | Access-token lifetime |
 | `REFRESH_TOKEN_TTL_SECONDS` | no | `2592000` | Refresh-token lifetime (30 days) |
 
-## Module template
+## Project layout
 
-Every feature module lives under `src/ecom_be/modules/<module_name>/` and has
-exactly these files:
+The application is layered, not module-packaged: every feature contributes one
+file to each layer, and the layer a change belongs in is decided by what it does
+rather than by which feature it serves.
 
 ```
-src/ecom_be/modules/<module_name>/
-├── __init__.py         # intentional public exports
-├── models.py           # SQLAlchemy ORM models on the shared Base
-├── errors.py           # domain errors: code and status_code on the class
-├── constants.py        # every bound the contract declares
-├── schemas/
-│   ├── __init__.py
-│   ├── request.py      # incoming payload models
-│   └── response.py     # outgoing payload models, plus the envelopes
-├── utils.py            # pure helpers: no I/O, no framework imports
-├── repository.py       # all database operations for this module
-├── services.py         # use cases; orchestrates repositories and clients
-└── router.py           # HTTP routes; calls services through dependencies
+app/
+├── main.py                     # app factory, lifespan, middleware wiring
+├── config/settings.py          # the validated settings object
+├── core/                       # cross-cutting concerns: errors.py, logging.py
+├── infrastructure/             # external systems
+│   ├── db/base.py              # the single declarative Base
+│   ├── db/mixins.py            # id and timestamp column mixins
+│   ├── db/session.py           # async engine + request-scoped session factory
+│   ├── db/urls.py              # configparser-safe DSN escaping for Alembic
+│   ├── cache/redis.py          # async Redis client factory
+│   ├── security/passwords.py   # Argon2 hashing and verification
+│   └── storage/local.py        # the StorageBackend protocol and its local adapter
+├── models/                     # ORM models, one module per feature
+│   ├── __init__.py             # imports every model; the Alembic target_metadata
+│   └── identity.py             # users, shops, roles, permissions, memberships, tokens
+├── schemas/                    # pydantic transport shapes
+│   ├── common.py               # the BaseResponse envelope
+│   ├── identity/               # one module per flow, named as api/v1/identity/
+│   │   ├── common.py           # shapes no single flow owns (roles, memberships)
+│   │   ├── auth.py             # register/login payloads + SessionData
+│   │   ├── profile.py          # profile requests + MeData + UserData
+│   │   └── shop.py             # shop requests + ShopData
+│   └── health.py
+├── repositories/               # database operations, one module per owning model
+│   ├── user_repository.py      # statements against users
+│   ├── shop_repository.py      # statements against shops
+│   ├── role_repository.py      # roles and permissions (read-only lookups)
+│   ├── membership_repository.py# memberships + the permission resolution
+│   └── refresh_token_repository.py  # refresh token lifecycle
+├── services/                   # use cases, one module per service
+│   ├── identity_service.py     # the composite facade over the three seams
+│   ├── auth_service.py         # register, login, refresh, logout, switch-shop
+│   ├── account_service.py      # the caller's own profile, avatar, deactivation
+│   ├── shop_service.py         # the active shop's profile and retirement
+│   ├── session_service.py      # the Session result and issue_session
+│   ├── rate_limit_service.py   # cross-feature Redis limiter
+│   ├── media_service.py
+│   └── health_service.py
+├── errors/                     # domain errors, one module per feature
+│   ├── identity.py
+│   └── media.py
+├── constants/                  # contract bounds, grouped by the subject they bound
+│   └── identity/{account,shop,rbac,media}.py
+├── utils/                      # pure helpers, one module per feature
+│   ├── identity.py
+│   ├── media.py
+│   └── health.py
+└── api/                        # HTTP transport
+    ├── deps.py                 # shared dependencies, guards, and health probes
+    ├── principal.py            # the framework-free resolved caller
+    ├── media_urls.py           # stored object key -> URL
+    └── v1/
+        ├── __init__.py         # composes the feature routers; adds no behavior
+        ├── health.py
+        ├── media.py
+        └── identity/           # one module per resource area
+            ├── __init__.py     # assembles `router` and `shops_router`
+            ├── common.py       # shared response mappers and the refresh cookie
+            ├── auth.py         # register, login, refresh, logout, switch-shop
+            ├── profile.py      # /auth/me read, update, and deactivation
+            ├── media_uploads.py# the caller's avatar
+            └── shops.py        # the active shop's profile and background
 ```
 
-`models.py` and `repository.py` may be omitted while a module has no persisted
-entity — `modules/health/` and `modules/media/` are those cases — but a module
-that persists anything adds them rather than inventing another shape.
+A layer file exists only when the feature has something to put in it, and a layer
+that outgrows one file splits per owning model in `repositories/` or per use-case
+seam in `services/`. `media` and `health` persist nothing, so they contribute no
+model, no repository, and no constants.
+
+The envelope lives in `schemas/common.py` as `BaseResponse`, and the router layer
+applies it directly as `response_model=BaseResponse[YourData]`. There is no
+per-endpoint envelope subclass: one class carries `status_code`, `message`, and
+`data` for every successful response.
 
 ### Layer rules
 
-- **Routes never perform persistence.** `router.py` declares the HTTP
+- **Routes never perform persistence.** A router in `api/v1/` declares the HTTP
   contract, resolves dependencies, and delegates. No SQLAlchemy session is
   touched and no query is built in a route.
-- **Services own use cases.** `services.py` holds the business decision — which
-  repository calls happen, in what order, and what the outcome means. It is
-  async and takes its collaborators through its constructor, so it can be
-  tested with fakes and without a database.
-- **Repositories own database operations.** `repository.py` is the only place
-  that executes statements or builds queries against the session. It takes a
-  session (or a factory) in its constructor and never commits on its own.
-- **`utils.py` stays pure.** Deterministic helpers only: no I/O, no session, no
-  `httpx`/`redis` client, no request object.
+- **Services own use cases.** A `services/<name>_service.py` holds the business
+  decision — which repository calls happen, in what order, and what the outcome
+  means. It is async and takes its collaborators through its constructor, so it
+  can be tested with fakes and without a database. A feature whose use cases span
+  several aggregates gets one module per seam and a composite service whose class
+  is the single entry point.
+- **Repositories own database operations.** `repositories/<model>_repository.py`
+  is the only place that executes statements or builds queries against the
+  session, one module per owning model rather than per feature, so a table's
+  statements have exactly one home. Repositories take a session and never commit
+  on their own; the transaction boundary belongs to the service.
+- **`utils/<feature>.py` stays pure.** Deterministic helpers only: no I/O, no
+  session, no `httpx`/`redis` client, no request object.
 - **All I/O is async.** Database access uses `AsyncSession`, Redis uses
   `redis.asyncio`, and outbound HTTP uses an async client. A synchronous driver
   call inside a coroutine blocks the event loop and is treated as a defect.
-- **Schemas are transport types.** `schemas/request.py` and
-  `schemas/response.py` define the API boundary; ORM models stay out of
-  responses and are mapped explicitly.
+- **Schemas are transport types.** A `schemas/<feature>.py` or
+  `schemas/<feature>/` package defines the API boundary; ORM models stay out of
+  responses and are mapped explicitly. A feature with several router flows splits
+  its schemas with the same flow names, so a flow's requests and payloads sit beside
+  the routes that use them, and a `common` module holds what more than one flow
+  embeds.
 
-### Wiring a new module
+### Wiring a new feature
 
-1. Create the directory and files above.
-2. Register the routes in `src/ecom_be/api/router.py` with
-   `api_router.include_router(<module>.router)`; that file only composes
-   modules and adds no behavior of its own.
-3. Reuse the request-scoped session from `ecom_be.infrastructure.db.session` and
+1. Add the layer files the feature needs: `models/<feature>.py`,
+   `repositories/<model>_repository.py` (one per owning model),
+   `services/<name>_service.py`, `errors/<feature>.py`, `constants/<feature>.py`,
+   `utils/<feature>.py`, `schemas/<feature>.py` (or `schemas/<feature>/`, one
+   module per flow), and a router under `api/v1/`.
+2. Register the router in `app/api/v1/__init__.py` with
+   `api_router.include_router(...)`; that file only composes routers and adds no
+   behavior of its own.
+3. Reuse the request-scoped session from `app.infrastructure.db.session` and
    the lifecycle-owned Redis client from `app.state`; do not create clients per
    request.
-4. If the module persists data, add `models.py`, import the model class in
-   `src/ecom_be/infrastructure/db/models.py` (the Alembic metadata aggregation
+4. If the feature persists data, add `models/<feature>.py`, import the model
+   class in `app/models/__init__.py` (the Alembic metadata aggregation
    point), and generate a migration.
-5. Add unit tests under `tests/unit/` and API tests under
-   `tests/integration/`.
+5. Add unit tests under `tests/unit/` and API tests under `tests/integration/`.
 
 ## Continuous integration
 

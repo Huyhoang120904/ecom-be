@@ -3,7 +3,7 @@ import pytest
 
 @pytest.mark.anyio
 async def test_readiness_reports_dependency_failure_without_hiding_it():
-    from ecom_be.modules.health.services import HealthService
+    from app.services.health_service import HealthService
 
     async def database_probe():
         return True
@@ -19,7 +19,7 @@ async def test_readiness_reports_dependency_failure_without_hiding_it():
 
 @pytest.mark.anyio
 async def test_readiness_logs_probe_failure_without_exception_details(caplog):
-    from ecom_be.modules.health.services import HealthService
+    from app.services.health_service import HealthService
 
     failure_details = "probe failure details"
 

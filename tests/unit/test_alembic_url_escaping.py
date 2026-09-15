@@ -23,7 +23,7 @@ import pytest
 from alembic.config import Config
 from pydantic import PostgresDsn
 
-from ecom_be.infrastructure.db.urls import escape_for_configparser
+from app.infrastructure.db.urls import escape_for_configparser
 
 REPO_ROOT = Path(__file__).parents[2]
 
@@ -80,6 +80,7 @@ def _run_env(database_url: str) -> subprocess.CompletedProcess[str]:
             "PATH": "/usr/bin:/bin",
             "DATABASE_URL": database_url,
             "REDIS_URL": "redis://localhost:56379/0",
+            "JWT_SECRET": "test-secret-that-is-long-enough-32",
         },
         capture_output=True,
         text=True,

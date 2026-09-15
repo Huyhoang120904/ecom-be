@@ -15,7 +15,7 @@ from __future__ import annotations
 from sqlalchemy import DateTime
 from sqlalchemy.orm import DeclarativeBase
 
-from ecom_be.infrastructure.db.mixins import (
+from app.infrastructure.db.mixins import (
     SoftDeleteMixin,
     TimestampMixin,
     UUIDPrimaryKeyMixin,

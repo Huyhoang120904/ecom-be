@@ -11,7 +11,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
 
-from ecom_be.modules.identity import repository
+from app.repositories import membership_repository
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
 
@@ -44,7 +44,7 @@ class TestPermissionGuard:
 
         headers = await owner_headers(db_async_client)
         shop = await current_shop(db_async_client, headers)
-        await repository.set_membership_role_by_key(
+        await membership_repository.set_membership_role_by_key(
             db_session,
             user_email=SHOP_OWNER["email"],
             shop_id=shop["id"],
@@ -76,7 +76,7 @@ class TestPermissionGuard:
             )
         ).status_code == 200
 
-        await repository.set_membership_role_by_key(
+        await membership_repository.set_membership_role_by_key(
             db_session,
             user_email=SHOP_OWNER["email"],
             shop_id=shop["id"],
@@ -92,7 +92,7 @@ class TestPermissionGuard:
     async def test_a_manager_cannot_delete_the_shop(self, db_async_client, db_session):
         headers = await owner_headers(db_async_client)
         shop = await current_shop(db_async_client, headers)
-        await repository.set_membership_role_by_key(
+        await membership_repository.set_membership_role_by_key(
             db_session,
             user_email=SHOP_OWNER["email"],
             shop_id=shop["id"],
