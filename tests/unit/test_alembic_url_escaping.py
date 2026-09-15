@@ -80,6 +80,7 @@ def _run_env(database_url: str) -> subprocess.CompletedProcess[str]:
             "PATH": "/usr/bin:/bin",
             "DATABASE_URL": database_url,
             "REDIS_URL": "redis://localhost:56379/0",
+            "JWT_SECRET": "test-secret-that-is-long-enough-32",
         },
         capture_output=True,
         text=True,
