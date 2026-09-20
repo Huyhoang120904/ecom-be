@@ -516,3 +516,91 @@ class TestShops:
         )
 
         assert rows.scalar_one() is not None, "retired, not purged"
+
+
+class TestBuyerAndAdminServices:
+    async def test_buyer_registration_and_login(self, db_session):
+        service = IdentityService(db_session)
+        session = await service.register(
+            email="purebuyer@example.com",
+            password=PASSWORD,
+            full_name="Pure Buyer",
+            shop_name=None,
+        )
+        assert session.user.email == "purebuyer@example.com"
+        assert session.active_shop is None
+        assert session.memberships == []
+        assert session.audience == "storefront"
+
+        # Login as buyer
+        login_session = await service.login(
+            email="purebuyer@example.com",
+            password=PASSWORD,
+            audience="storefront",
+        )
+        assert login_session.active_shop is None
+        assert login_session.audience == "storefront"
+
+        # Refresh buyer session
+        refreshed = await service.refresh(login_session.refresh_token)
+        assert refreshed.active_shop is None
+        assert refreshed.audience == "storefront"
+
+        # Calling me as buyer
+        user, shop, memberships, _permissions = await service.me(
+            user_id=session.user.id, shop_id=None
+        )
+        assert user.email == "purebuyer@example.com"
+        assert shop is None
+        assert memberships == []
+
+    async def test_admin_login_requires_platform_membership(self, db_session):
+        from app.errors.identity import Forbidden
+
+        service = IdentityService(db_session)
+        # Register regular user without platform membership
+        await service.register(
+            email="regular_buyer@example.com",
+            password=PASSWORD,
+            full_name="Regular Buyer",
+            shop_name=None,
+        )
+        with pytest.raises(Forbidden):
+            await service.login(
+                email="regular_buyer@example.com",
+                password=PASSWORD,
+                audience="admin",
+            )
+
+    async def test_admin_login_and_refresh_with_platform_membership(self, db_session):
+        from app.cli import create_admin_account
+
+        admin_user = await create_admin_account(
+            db_session,
+            email="sysadmin_serv@example.com",
+            password=PASSWORD,
+            full_name="Sys Admin Service",
+        )
+        service = IdentityService(db_session)
+        session = await service.login(
+            email=admin_user.email,
+            password=PASSWORD,
+            audience="admin",
+        )
+        assert session.active_shop is None
+        assert session.audience == "admin"
+        assert "platform:metrics:read" in session.permissions
+
+        # Refresh admin session
+        refreshed = await service.refresh(session.refresh_token)
+        assert refreshed.audience == "admin"
+        assert refreshed.active_shop is None
+        assert "platform:metrics:read" in refreshed.permissions
+
+        # Calling me as admin
+        user, shop, _memberships, permissions = await service.me(
+            user_id=admin_user.id, shop_id=None
+        )
+        assert user.email == admin_user.email
+        assert shop is None
+        assert "platform:metrics:read" in permissions

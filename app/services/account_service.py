@@ -30,29 +30,44 @@ class AccountService:
         self._settings = settings if settings is not None else get_settings()
 
     async def me(
-        self, *, user_id: uuid.UUID, shop_id: uuid.UUID
-    ) -> tuple[User, Shop, list[tuple[Shop, Role]], list[str]]:
+        self, *, user_id: uuid.UUID, shop_id: uuid.UUID | None = None
+    ) -> tuple[User, Shop | None, list[tuple[Shop, Role]], list[str]]:
         """The caller's identity, their memberships, and their effective permissions."""
 
-        resolved = await membership_repository.effective_permissions(
-            self._session, user_id=user_id, shop_id=shop_id
-        )
-        if resolved is None:
-            # Distinguish "the account is gone" from "the shop is not yours", so a
-            # deactivated client stops retrying instead of looping on a 401.
-            user = await user_repository.get_user(self._session, user_id)
-            if user is None or user.deactivated_at is not None:
-                raise AccountInactive
-            raise ShopNotAccessible
+        if shop_id is not None:
+            resolved = await membership_repository.effective_permissions(
+                self._session, user_id=user_id, shop_id=shop_id
+            )
+            if resolved is None:
+                # Distinguish "the account is gone" from "the shop is not yours", so a
+                # deactivated client stops retrying instead of looping on a 401.
+                user = await user_repository.get_user(self._session, user_id)
+                if user is None or user.deactivated_at is not None:
+                    raise AccountInactive
+                raise ShopNotAccessible
 
-        user, _role, permissions = resolved
-        shop = await shop_repository.get_shop(self._session, shop_id)
-        if shop is None:
-            raise ShopNotAccessible
-        memberships = await membership_repository.list_memberships(
+            user, _role, permissions = resolved
+            shop = await shop_repository.get_shop(self._session, shop_id)
+            if shop is None:
+                raise ShopNotAccessible
+            memberships = await membership_repository.list_memberships(
+                self._session, user_id
+            )
+            return user, shop, memberships, permissions
+
+        user = await user_repository.get_user(self._session, user_id)
+        if user is None or user.deactivated_at is not None:
+            raise AccountInactive
+
+        platform_membership = await membership_repository.find_platform_membership(
             self._session, user_id
         )
-        return user, shop, memberships, permissions
+        if platform_membership is not None:
+            _role, permissions = platform_membership
+        else:
+            permissions = []
+
+        return user, None, [], permissions
 
     async def update_profile(
         self, *, user_id: uuid.UUID, changes: dict[str, str | None]
