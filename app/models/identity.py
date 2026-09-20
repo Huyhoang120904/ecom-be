@@ -45,7 +45,10 @@ from app.infrastructure.db.mixins import (
 
 SLUG_PATTERN = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 ROLE_KEY_PATTERN = r"^[a-z][a-z0-9_]*$"
-PERMISSION_KEY_PATTERN = r"^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$"
+# One or more colon-separated segments, so a capability can be hierarchical:
+# ``shop:read`` and ``platform:metrics:read`` are both keys. The subject before the
+# last colon names what is acted on, and the last segment names the action.
+PERMISSION_KEY_PATTERN = r"^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)+$"
 
 
 class User(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
@@ -274,15 +277,21 @@ class Membership(UUIDPrimaryKeyMixin, TimestampMixin, SoftDeleteMixin, Base):
             "user_id",
             "shop_id",
             unique=True,
-            postgresql_where=text("deleted_at IS NULL"),
+            postgresql_where=text("deleted_at IS NULL AND shop_id IS NOT NULL"),
+        ),
+        Index(
+            "memberships_user_platform_live",
+            "user_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL AND shop_id IS NULL"),
         ),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    shop_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("shops.id", ondelete="CASCADE"), nullable=False
+    shop_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("shops.id", ondelete="CASCADE"), nullable=True
     )
     role_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -340,6 +349,9 @@ class RefreshToken(UUIDPrimaryKeyMixin, Base):
         nullable=True,
     )
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    audience: Mapped[str] = mapped_column(
+        String(32), nullable=False, server_default=text("'cms'")
+    )
     family_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

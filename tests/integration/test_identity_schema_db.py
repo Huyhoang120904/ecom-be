@@ -267,3 +267,99 @@ async def test_ids_are_generated_by_the_database_when_not_supplied(db_session):
     )
 
     assert rows.scalar_one() is not None
+
+
+# --- Platform permissions and memberships: the admin/buyer migration's vocabulary ---
+
+SEEDED_HIERARCHICAL_KEY = "platform:metrics:read"
+
+
+async def test_the_migration_seeds_a_hierarchical_permission_key(db_session):
+    """The seed's third segment is what forced the key constraint to widen."""
+
+    rows = await db_session.execute(
+        text("SELECT description FROM permissions WHERE key = :key"),
+        {"key": SEEDED_HIERARCHICAL_KEY},
+    )
+
+    assert rows.scalar_one() == "View all system, sales, and platform metrics"
+
+
+async def test_the_constraint_accepts_a_new_hierarchical_permission_key(db_session):
+    """The widened pattern is a vocabulary, not a whitelist of the seeded keys."""
+
+    await db_session.execute(
+        text(
+            "INSERT INTO permissions (key, description) "
+            "VALUES ('platform:reports:read', 'Read platform reports')"
+        )
+    )
+    rows = await db_session.execute(
+        text("SELECT key FROM permissions WHERE key = 'platform:reports:read'")
+    )
+
+    assert rows.scalar_one() == "platform:reports:read"
+
+
+@pytest.mark.parametrize(
+    "bad_key",
+    [
+        "platform::read",
+        "Platform:metrics:read",
+        "platform:metrics:",
+        "platform: metrics",
+    ],
+)
+async def test_malformed_permission_keys_are_rejected(db_session, bad_key):
+    """One segment or more, but never an empty one and never a capital letter.
+
+    Parametrized rather than looped: the first rejected insert aborts the
+    transaction, so a second statement in the same test could not be judged on its
+    own merits.
+    """
+
+    with pytest.raises(IntegrityError) as excinfo:
+        await db_session.execute(
+            text("INSERT INTO permissions (key, description) VALUES (:key, 'Bad')"),
+            {"key": bad_key},
+        )
+
+    assert "permissions_key_ck" in str(excinfo.value)
+
+
+async def test_platform_membership_allows_null_shop_id_and_enforces_uniqueness(
+    db_session,
+):
+    await db_session.execute(
+        text(
+            "INSERT INTO users (email, password_hash, full_name) "
+            "VALUES ('admin_user@example.com', 'x', 'Admin User')"
+        )
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO memberships (user_id, shop_id, role_id) "
+            "SELECT u.id, NULL, r.id FROM users u, roles r "
+            "WHERE u.email = 'admin_user@example.com' AND r.key = 'sys_admin' "
+            "AND r.shop_id IS NULL"
+        )
+    )
+    count = await db_session.execute(
+        text(
+            "SELECT count(*) FROM memberships m "
+            "JOIN users u ON m.user_id = u.id "
+            "WHERE u.email = 'admin_user@example.com' AND m.shop_id IS NULL"
+        )
+    )
+    assert count.scalar_one() == 1
+
+    with pytest.raises(IntegrityError) as excinfo:
+        await db_session.execute(
+            text(
+                "INSERT INTO memberships (user_id, shop_id, role_id) "
+                "SELECT u.id, NULL, r.id FROM users u, roles r "
+                "WHERE u.email = 'admin_user@example.com' AND r.key = 'sys_admin' "
+                "AND r.shop_id IS NULL"
+            )
+        )
+    assert "memberships_user_platform_live" in str(excinfo.value)

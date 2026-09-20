@@ -23,6 +23,20 @@ EXPECTED_PERMISSIONS = {
     "membership:manage",
 }
 
+# The platform vocabulary the admin/buyer migration adds. A shop role never holds
+# one of these: they describe oversight of the whole platform, which is what makes
+# ``sys_admin`` different from ``owner`` rather than merely broader.
+PLATFORM_PERMISSIONS = {
+    "platform:metrics:read",
+    "platform:shops:read",
+    "platform:shops:manage",
+    "platform:users:read",
+    "platform:users:manage",
+}
+
+SHOP_PERMISSIONS = EXPECTED_PERMISSIONS
+EVERY_PERMISSION = SHOP_PERMISSIONS | PLATFORM_PERMISSIONS
+
 OWNER_ONLY = {"shop:update", "membership:manage"}
 
 
@@ -42,22 +56,28 @@ async def _permission_keys_for(db_session, role_key: str) -> set[str]:
 async def test_exactly_the_documented_permissions_are_seeded(db_session):
     rows = await db_session.execute(text("SELECT key FROM permissions"))
 
-    assert {row[0] for row in rows} == EXPECTED_PERMISSIONS
+    assert {row[0] for row in rows} == EVERY_PERMISSION
 
 
-async def test_the_three_system_roles_are_seeded_with_no_shop(db_session):
+async def test_the_four_system_roles_are_seeded_with_no_shop(db_session):
     rows = await db_session.execute(text("SELECT key FROM roles WHERE shop_id IS NULL"))
 
-    assert {row[0] for row in rows} == {"owner", "manager", "viewer"}
+    assert {row[0] for row in rows} == {"owner", "manager", "viewer", "sys_admin"}
 
 
-async def test_owner_holds_every_permission(db_session):
-    assert await _permission_keys_for(db_session, "owner") == EXPECTED_PERMISSIONS
+async def test_owner_holds_every_shop_permission(db_session):
+    assert await _permission_keys_for(db_session, "owner") == SHOP_PERMISSIONS
+
+
+async def test_sys_admin_holds_every_permission(db_session):
+    """Platform oversight is universal by seed, not only by the Principal bypass."""
+
+    assert await _permission_keys_for(db_session, "sys_admin") == EVERY_PERMISSION
 
 
 async def test_manager_lacks_the_two_owner_only_permissions(db_session):
     assert await _permission_keys_for(db_session, "manager") == (
-        EXPECTED_PERMISSIONS - OWNER_ONLY
+        SHOP_PERMISSIONS - OWNER_ONLY
     )
 
 
@@ -82,4 +102,4 @@ async def test_no_role_holds_a_permission_that_was_not_seeded(db_session):
         )
     )
 
-    assert {row[0] for row in rows} <= EXPECTED_PERMISSIONS
+    assert {row[0] for row in rows} <= EVERY_PERMISSION
