@@ -18,6 +18,7 @@ from app.api.deps import (
     require_platform_admin,
     require_roles,
     require_seller,
+    require_seller_permissions,
 )
 from app.api.principal import Principal
 from app.core.errors import register_exception_handlers
@@ -334,6 +335,65 @@ class TestRequireSeller:
             active_shop_id=None,
         )
         response = await _get(_guarded_app(require_seller, principal=broken_seller))
+
+        assert response.status_code == 403
+        assert response.json()["error"] == "forbidden"
+
+
+class TestRequireSellerPermissions:
+    """A shop-scoped route checks the audience *and* the permission, in that order."""
+
+    async def test_a_seller_holding_the_permission_passes(self):
+        seller = _principal(
+            audience="cms",
+            permissions=frozenset({"shop:update"}),
+            active_shop_id="22222222-2222-4222-8222-222222222222",
+        )
+        response = await _get(
+            _guarded_app(require_seller_permissions("shop:update"), principal=seller)
+        )
+
+        assert response.status_code == 200
+
+    async def test_a_seller_without_the_permission_is_forbidden(self):
+        seller = _principal(
+            audience="cms",
+            permissions=frozenset({"shop:read"}),
+            active_shop_id="22222222-2222-4222-8222-222222222222",
+        )
+        response = await _get(
+            _guarded_app(require_seller_permissions("shop:update"), principal=seller)
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"] == "forbidden"
+
+    async def test_a_platform_admin_is_refused_despite_every_permission(self):
+        """No shop to act in, so the route refuses instead of unpacking a null sid."""
+
+        admin = _principal(
+            audience="admin",
+            active_shop_id=None,
+            roles=("sys_admin",),
+            is_platform_admin=True,
+        )
+        response = await _get(
+            _guarded_app(require_seller_permissions("shop:update"), principal=admin)
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"] == "forbidden"
+
+    async def test_a_storefront_buyer_is_forbidden(self):
+        buyer = _principal(
+            audience="storefront",
+            active_shop_id=None,
+            permissions=frozenset(),
+            roles=(),
+        )
+        response = await _get(
+            _guarded_app(require_seller_permissions("shop:update"), principal=buyer)
+        )
 
         assert response.status_code == 403
         assert response.json()["error"] == "forbidden"

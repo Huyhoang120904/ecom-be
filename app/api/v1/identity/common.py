@@ -130,7 +130,9 @@ def _me_data(
     permissions: list[str],
     request: Request,
     *,
-    audience: str = "cms",
+    # Keyword-only and required: a default here silently labelled a buyer's response
+    # as ``cms``, which is the one field a client uses to decide what to render.
+    audience: str,
     is_platform_admin: bool = False,
 ) -> MeData:
     return MeData(

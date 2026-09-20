@@ -63,11 +63,23 @@ async def upload_avatar(
 
     user, shop, memberships, permissions = await service.me(
         user_id=uuid.UUID(principal.user_id),
-        shop_id=uuid.UUID(principal.active_shop_id),
+        # An avatar belongs to the account, not to a shop, so a buyer with no active
+        # shop uploads one here too; ``me`` already answers with no shop for them.
+        shop_id=(
+            uuid.UUID(principal.active_shop_id) if principal.active_shop_id else None
+        ),
     )
     return BaseResponse[MeData](
         status_code=status.HTTP_200_OK,
-        data=_me_data(user, shop, memberships, permissions, request),
+        data=_me_data(
+            user,
+            shop,
+            memberships,
+            permissions,
+            request,
+            audience=principal.audience,
+            is_platform_admin=principal.is_platform_admin,
+        ),
     )
 
 

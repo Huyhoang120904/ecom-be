@@ -266,6 +266,28 @@ async def require_seller(
     return principal
 
 
+def require_seller_permissions(*keys: str) -> Callable[..., Awaitable[Principal]]:
+    """Enforce a seller acting inside a shop who holds every requested permission.
+
+    A shop-scoped route needs two separate facts. The audience says the token
+    belongs to the CMS perimeter at all; the permission says what this member may do
+    there. Checking only the permission is not enough: a platform administrator
+    satisfies every permission by construction yet has no ``sid``, so a route that
+    unpacked ``active_shop_id`` would raise instead of refusing the caller.
+    """
+
+    async def dependency(
+        principal: Annotated[Principal, Depends(get_current_principal)],
+    ) -> Principal:
+        if principal.audience != "cms" or principal.active_shop_id is None:
+            raise Forbidden
+        if not principal.has(*keys):
+            raise Forbidden
+        return principal
+
+    return dependency
+
+
 def get_settings_dependency() -> Settings:
     """The validated settings, for routes that need a TTL or an origin."""
 

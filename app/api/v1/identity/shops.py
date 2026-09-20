@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import (
     get_application_db_session,
     get_optional_redis_client,
-    require_permissions,
+    require_seller_permissions,
 )
 from app.api.principal import Principal
 from app.api.v1.identity.common import _client_key, _shop_data
@@ -33,7 +33,7 @@ shops_router = APIRouter(prefix="/api/v1/shops", tags=["shops"])
 @shops_router.post("/active/background", response_model=BaseResponse[ShopData])
 async def upload_background(
     request: Request,
-    principal: Annotated[Principal, Depends(require_permissions("shop:update"))],
+    principal: Annotated[Principal, Depends(require_seller_permissions("shop:update"))],
     session: Annotated[AsyncSession, Depends(get_application_db_session)],
     media: Annotated[MediaService, Depends(get_media_service)],
     file: Annotated[UploadFile, File()],
@@ -62,7 +62,7 @@ async def upload_background(
 
 @shops_router.delete("/active/background", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_background(
-    principal: Annotated[Principal, Depends(require_permissions("shop:update"))],
+    principal: Annotated[Principal, Depends(require_seller_permissions("shop:update"))],
     session: Annotated[AsyncSession, Depends(get_application_db_session)],
     media: Annotated[MediaService, Depends(get_media_service)],
 ) -> None:
@@ -77,7 +77,7 @@ async def delete_background(
 async def update_active_shop(
     payload: ShopUpdateRequest,
     request: Request,
-    principal: Annotated[Principal, Depends(require_permissions("shop:update"))],
+    principal: Annotated[Principal, Depends(require_seller_permissions("shop:update"))],
     session: Annotated[AsyncSession, Depends(get_application_db_session)],
 ) -> BaseResponse[ShopData]:
     """Update the active shop's profile. The slug is not part of the contract."""
@@ -96,7 +96,7 @@ async def update_active_shop(
 @shops_router.delete("/active", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_active_shop(
     payload: DeleteShopRequest,
-    principal: Annotated[Principal, Depends(require_permissions("shop:update"))],
+    principal: Annotated[Principal, Depends(require_seller_permissions("shop:update"))],
     session: Annotated[AsyncSession, Depends(get_application_db_session)],
 ) -> None:
     """Retire the shop. Confirmed by its own name, read from the database."""

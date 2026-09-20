@@ -8,8 +8,11 @@ status and error code of each failure.
 
 from __future__ import annotations
 
+import io
+
 import pytest
 from httpx import AsyncClient
+from PIL import Image
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
 
@@ -33,6 +36,28 @@ def _cookie_attributes(set_cookie: str) -> dict[str, str]:
 
 async def _register(client: AsyncClient, payload: dict | None = None):
     return await client.post("/api/v1/auth/register", json=payload or REGISTER)
+
+
+def _png() -> bytes:
+    """A valid image for the avatar route, which refuses anything else."""
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (64, 64), (10, 20, 30)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+async def _buyer_token(client: AsyncClient, email: str) -> str:
+    """Register a buyer (no shop) and return their storefront access token."""
+
+    await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": PASSWORD, "full_name": "Buyer Person"},
+    )
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": PASSWORD, "audience": "storefront"},
+    )
+    return login.json()["data"]["access_token"]
 
 
 class TestRegister:
@@ -410,3 +435,68 @@ class TestBuyerAndAdminApi:
         assert me_data["audience"] == "admin"
         assert me_data["is_platform_admin"] is True
         assert "platform:metrics:read" in me_data["permissions"]
+
+    async def test_a_storefront_token_is_refused_on_a_seller_route(
+        self, db_async_client
+    ):
+        """Audience isolation: the buyer owns no shop, so no shop route is theirs."""
+
+        token = await _buyer_token(db_async_client, "buyer_seller_route@example.com")
+
+        response = await db_async_client.patch(
+            "/api/v1/shops/active",
+            json={"description": "Not mine to change."},
+            headers={"authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"] == "forbidden"
+
+    async def test_an_admin_token_is_refused_on_a_seller_route(
+        self, db_async_client, db_session
+    ):
+        """Every permission, no shop: refused, not raising on a missing sid."""
+
+        from app.cli import create_admin_account
+
+        await create_admin_account(
+            db_session,
+            email="platform_admin_routes@example.com",
+            password=PASSWORD,
+            full_name="Platform Admin Routes",
+        )
+        login = await db_async_client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": "platform_admin_routes@example.com",
+                "password": PASSWORD,
+                "audience": "admin",
+            },
+        )
+        token = login.json()["data"]["access_token"]
+
+        response = await db_async_client.patch(
+            "/api/v1/shops/active",
+            json={"description": "Not the platform's to edit from here."},
+            headers={"authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"] == "forbidden"
+
+    async def test_a_buyer_can_upload_their_own_avatar(self, db_async_client):
+        """An avatar belongs to the account, so a shop-less caller can still set one."""
+
+        token = await _buyer_token(db_async_client, "buyer_avatar@example.com")
+
+        upload = await db_async_client.post(
+            "/api/v1/auth/me/avatar",
+            files={"file": ("me.png", _png(), "image/png")},
+            headers={"authorization": f"Bearer {token}"},
+        )
+
+        assert upload.status_code == 200
+        data = upload.json()["data"]
+        assert data["audience"] == "storefront"
+        assert data["active_shop"] is None
+        assert data["user"]["avatar_url"] is not None
