@@ -3,12 +3,10 @@
 The migration URL comes from the validated application settings, so the same
 ``DATABASE_URL`` drives the application and its migrations.
 
-``target_metadata`` is the aggregation view
-``ecom_be.infrastructure.db.models``, which imports every module's ORM models so
-they register on the shared declarative ``Base``. That import is what makes
-``alembic revision --autogenerate`` see a new module's tables. This scaffold has
-no persisted business entity yet, so ``alembic upgrade head`` succeeds with an
-empty migration history.
+``target_metadata`` is the aggregation view ``app.models``, which imports
+every ORM model module so they register on the shared declarative ``Base``. That
+import is what makes ``alembic revision --autogenerate`` see a new feature's
+tables.
 """
 
 import asyncio
@@ -19,9 +17,9 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
-from ecom_be.core.config import get_settings
-from ecom_be.infrastructure.db.models import metadata
-from ecom_be.infrastructure.db.urls import escape_for_configparser
+from app.config.settings import get_settings
+from app.infrastructure.db.urls import escape_for_configparser
+from app.models import metadata
 
 config = context.config
 
@@ -40,7 +38,7 @@ config.set_main_option(
 
 # The named metadata view: it imports the shared declarative Base and every
 # module's ORM models, so autogenerate compares against all of them. Add new
-# models to `ecom_be.infrastructure.db.models`, not here.
+# models to `app.models`, not here.
 target_metadata = metadata
 
 

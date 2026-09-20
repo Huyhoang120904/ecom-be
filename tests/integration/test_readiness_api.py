@@ -3,8 +3,8 @@ import pytest
 
 @pytest.mark.anyio
 async def test_readiness_endpoint_returns_ok_for_healthy_dependencies(async_client):
-    from ecom_be.api.deps import get_database_probe, get_redis_probe
-    from ecom_be.main import app
+    from app.api.deps import get_database_probe, get_redis_probe
+    from app.main import app
 
     async def database_probe():
         return True
@@ -21,17 +21,19 @@ async def test_readiness_endpoint_returns_ok_for_healthy_dependencies(async_clie
 
     assert response.status_code == 200
     assert response.json() == {
+        "status_code": 200,
+        "message": "Success",
         "data": {
             "status": "ok",
             "dependencies": {"database": "ok", "redis": "ok"},
-        }
+        },
     }
 
 
 @pytest.mark.anyio
 async def test_readiness_endpoint_returns_503_for_unavailable_dependency(async_client):
-    from ecom_be.api.deps import get_database_probe, get_redis_probe
-    from ecom_be.main import app
+    from app.api.deps import get_database_probe, get_redis_probe
+    from app.main import app
 
     async def database_probe():
         return True
@@ -47,13 +49,16 @@ async def test_readiness_endpoint_returns_503_for_unavailable_dependency(async_c
         app.dependency_overrides.clear()
 
     assert response.status_code == 503
-    # The body is the same envelope at 503 as at 200: the status code is the
-    # signal, and the shape is identical so a client can unwrap unconditionally.
+    # The body is the same envelope at 503 as at 200, and its ``status_code`` echoes
+    # the code the route returned, so a client can read the outcome from the body it
+    # already has. The shape is identical, so the unwrap is still unconditional.
     assert response.json() == {
+        "status_code": 503,
+        "message": "Success",
         "data": {
             "status": "not_ready",
             "dependencies": {"database": "ok", "redis": "unavailable"},
-        }
+        },
     }
 
 
@@ -61,8 +66,8 @@ async def test_readiness_endpoint_returns_503_for_unavailable_dependency(async_c
 async def test_readiness_endpoint_uses_the_probe_a_dependency_override_provides(
     async_client,
 ):
-    from ecom_be.api.deps import get_database_probe, get_redis_probe
-    from ecom_be.main import app
+    from app.api.deps import get_database_probe, get_redis_probe
+    from app.main import app
 
     async def database_probe():
         return True
@@ -95,8 +100,8 @@ async def test_an_override_that_yields_a_value_instead_of_a_probe_reports_unavai
     value cannot be called.
     """
 
-    from ecom_be.api.deps import get_database_probe, get_redis_probe
-    from ecom_be.main import app
+    from app.api.deps import get_database_probe, get_redis_probe
+    from app.main import app
 
     app.dependency_overrides[get_database_probe] = lambda: True
     app.dependency_overrides[get_redis_probe] = lambda: True

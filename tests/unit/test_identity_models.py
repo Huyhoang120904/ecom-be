@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import CheckConstraint, Index
 
-from ecom_be.infrastructure.db.models import metadata
+from app.models import metadata
 
 EXPECTED_TABLES = {
     "users",

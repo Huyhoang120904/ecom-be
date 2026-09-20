@@ -41,7 +41,12 @@ class TestRegister:
 
         assert response.status_code == 201
         body = response.json()
-        assert set(body) == {"data"}, "the body must be enveloped"
+        assert set(body) == {
+            "status_code",
+            "message",
+            "data",
+        }, "the body must be a BaseResponse envelope"
+        assert body["status_code"] == 201, "the envelope echoes the status code"
         data = body["data"]
         assert data["token_type"] == "bearer"
         assert data["expires_in"] == 900

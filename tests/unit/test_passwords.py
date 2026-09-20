@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import time
 
-from ecom_be.infrastructure.security.passwords import (
+from app.infrastructure.security.passwords import (
     DUMMY_DIGEST,
     hash_password,
     verify_dummy,
