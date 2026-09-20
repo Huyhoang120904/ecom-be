@@ -29,13 +29,22 @@ async def me(
     session: Annotated[AsyncSession, Depends(get_application_db_session)],
 ) -> BaseResponse[MeData]:
     service = AccountService(session)
+    shop_id = uuid.UUID(principal.active_shop_id) if principal.active_shop_id else None
     user, shop, memberships, permissions = await service.me(
         user_id=uuid.UUID(principal.user_id),
-        shop_id=uuid.UUID(principal.active_shop_id),
+        shop_id=shop_id,
     )
     return BaseResponse[MeData](
         status_code=status.HTTP_200_OK,
-        data=_me_data(user, shop, memberships, permissions, request),
+        data=_me_data(
+            user,
+            shop,
+            memberships,
+            permissions,
+            request,
+            audience=principal.audience,
+            is_platform_admin=principal.is_platform_admin,
+        ),
     )
 
 
@@ -51,13 +60,22 @@ async def update_profile(
     service = AccountService(session)
     changes = {field: getattr(payload, field) for field in payload.model_fields_set}
     await service.update_profile(user_id=uuid.UUID(principal.user_id), changes=changes)
+    shop_id = uuid.UUID(principal.active_shop_id) if principal.active_shop_id else None
     user, shop, memberships, permissions = await service.me(
         user_id=uuid.UUID(principal.user_id),
-        shop_id=uuid.UUID(principal.active_shop_id),
+        shop_id=shop_id,
     )
     return BaseResponse[MeData](
         status_code=status.HTTP_200_OK,
-        data=_me_data(user, shop, memberships, permissions, request),
+        data=_me_data(
+            user,
+            shop,
+            memberships,
+            permissions,
+            request,
+            audience=principal.audience,
+            is_platform_admin=principal.is_platform_admin,
+        ),
     )
 
 

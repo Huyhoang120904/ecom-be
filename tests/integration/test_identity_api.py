@@ -71,6 +71,7 @@ class TestRegister:
             "access_token",
             "token_type",
             "expires_in",
+            "audience",
             "user",
             "active_shop",
             "memberships",
@@ -106,7 +107,7 @@ class TestLoginAndMe:
         await _register(db_async_client)
         login = await db_async_client.post(
             "/api/v1/auth/login",
-            json={"email": REGISTER["email"], "password": PASSWORD},
+            json={"email": REGISTER["email"], "password": PASSWORD, "audience": "cms"},
         )
         assert login.status_code == 200
         token = login.json()["data"]["access_token"]
@@ -145,7 +146,11 @@ class TestLoginAndMe:
 
         wrong = await db_async_client.post(
             "/api/v1/auth/login",
-            json={"email": REGISTER["email"], "password": "wrong-password-entirely"},
+            json={
+                "email": REGISTER["email"],
+                "password": "wrong-password-entirely",
+                "audience": "cms",
+            },
         )
         unknown = await db_async_client.post(
             "/api/v1/auth/login",
@@ -203,7 +208,7 @@ class TestProfileUpdate:
         await _register(client)
         login = await client.post(
             "/api/v1/auth/login",
-            json={"email": REGISTER["email"], "password": PASSWORD},
+            json={"email": REGISTER["email"], "password": PASSWORD, "audience": "cms"},
         )
         return {"authorization": f"Bearer {login.json()['data']['access_token']}"}
 
@@ -269,7 +274,7 @@ class TestDeactivate:
         await _register(db_async_client)
         login = await db_async_client.post(
             "/api/v1/auth/login",
-            json={"email": REGISTER["email"], "password": PASSWORD},
+            json={"email": REGISTER["email"], "password": PASSWORD, "audience": "cms"},
         )
         headers = {"authorization": f"Bearer {login.json()['data']['access_token']}"}
 
@@ -288,7 +293,7 @@ class TestDeactivate:
 
         relogin = await db_async_client.post(
             "/api/v1/auth/login",
-            json={"email": REGISTER["email"], "password": PASSWORD},
+            json={"email": REGISTER["email"], "password": PASSWORD, "audience": "cms"},
         )
         assert relogin.status_code == 403
         assert relogin.json()["error"] == "account_deactivated"
@@ -297,7 +302,7 @@ class TestDeactivate:
         await _register(db_async_client)
         login = await db_async_client.post(
             "/api/v1/auth/login",
-            json={"email": REGISTER["email"], "password": PASSWORD},
+            json={"email": REGISTER["email"], "password": PASSWORD, "audience": "cms"},
         )
         await db_async_client.post(
             "/api/v1/auth/deactivate",
@@ -309,3 +314,99 @@ class TestDeactivate:
 
         assert response.status_code == 409
         assert response.json()["error"] == "email_taken"
+
+
+class TestBuyerAndAdminApi:
+    async def test_buyer_registration_login_and_me(self, db_async_client):
+        reg = await db_async_client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "buyer1@example.com",
+                "password": PASSWORD,
+                "full_name": "Buyer One",
+            },
+        )
+        assert reg.status_code == 201
+        reg_data = reg.json()["data"]
+        assert reg_data["audience"] == "storefront"
+        assert reg_data["active_shop"] is None
+
+        # Login with audience="storefront"
+        login = await db_async_client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": "buyer1@example.com",
+                "password": PASSWORD,
+                "audience": "storefront",
+            },
+        )
+        assert login.status_code == 200
+        login_data = login.json()["data"]
+        assert login_data["audience"] == "storefront"
+        assert login_data["active_shop"] is None
+        token = login_data["access_token"]
+
+        # Call /auth/me
+        me = await db_async_client.get(
+            "/api/v1/auth/me", headers={"authorization": f"Bearer {token}"}
+        )
+        assert me.status_code == 200
+        me_data = me.json()["data"]
+        assert me_data["audience"] == "storefront"
+        assert me_data["active_shop"] is None
+        assert me_data["is_platform_admin"] is False
+
+    async def test_admin_login_forbidden_for_regular_user(self, db_async_client):
+        await db_async_client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "regular@example.com",
+                "password": PASSWORD,
+                "full_name": "Regular User",
+            },
+        )
+        login = await db_async_client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": "regular@example.com",
+                "password": PASSWORD,
+                "audience": "admin",
+            },
+        )
+        assert login.status_code == 403
+        assert login.json()["error"] == "forbidden"
+
+    async def test_admin_login_and_me_for_platform_admin(
+        self, db_async_client, db_session
+    ):
+        from app.cli import create_admin_account
+
+        await create_admin_account(
+            db_session,
+            email="platform_admin@example.com",
+            password=PASSWORD,
+            full_name="Platform Admin",
+        )
+
+        login = await db_async_client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": "platform_admin@example.com",
+                "password": PASSWORD,
+                "audience": "admin",
+            },
+        )
+        assert login.status_code == 200
+        login_data = login.json()["data"]
+        assert login_data["audience"] == "admin"
+        assert login_data["active_shop"] is None
+        token = login_data["access_token"]
+
+        me = await db_async_client.get(
+            "/api/v1/auth/me", headers={"authorization": f"Bearer {token}"}
+        )
+        assert me.status_code == 200
+        me_data = me.json()["data"]
+        assert me_data["audience"] == "admin"
+        assert me_data["is_platform_admin"] is True
+        assert "platform:metrics:read" in me_data["permissions"]

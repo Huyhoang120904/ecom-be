@@ -111,8 +111,13 @@ def _session_data(session: Session, request: Request) -> SessionData:
         access_token=session.access_token,
         token_type="bearer",
         expires_in=session.expires_in,
+        audience=session.audience,
         user=_user_data(session.user, request),
-        active_shop=_shop_data(session.active_shop, request),
+        active_shop=(
+            _shop_data(session.active_shop, request)
+            if session.active_shop is not None
+            else None
+        ),
         memberships=_membership_data(session.memberships, request),
         permissions=session.permissions,
     )
@@ -120,14 +125,19 @@ def _session_data(session: Session, request: Request) -> SessionData:
 
 def _me_data(
     user: User,
-    shop: Shop,
+    shop: Shop | None,
     memberships: list[tuple[Shop, Role]],
     permissions: list[str],
     request: Request,
+    *,
+    audience: str = "cms",
+    is_platform_admin: bool = False,
 ) -> MeData:
     return MeData(
         user=_user_data(user, request),
-        active_shop=_shop_data(shop, request),
+        audience=audience,
+        active_shop=_shop_data(shop, request) if shop is not None else None,
         memberships=_membership_data(memberships, request),
         permissions=permissions,
+        is_platform_admin=is_platform_admin,
     )

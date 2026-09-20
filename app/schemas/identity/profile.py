@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -93,9 +93,11 @@ class MeData(BaseModel):
     """The caller's own identity and the shop the token is scoped to."""
 
     user: UserData
-    active_shop: ShopData
-    memberships: list[MembershipData]
-    permissions: list[PermissionKey]
+    audience: Literal["storefront", "cms", "admin"] = "cms"
+    active_shop: ShopData | None = None
+    memberships: list[MembershipData] = Field(default_factory=list)
+    permissions: list[PermissionKey] = Field(default_factory=list)
+    is_platform_admin: bool = False
 
 
 class UserData(BaseModel):

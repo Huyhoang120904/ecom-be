@@ -31,12 +31,14 @@ from app.utils import identity as utils
 
 
 class RegisterRequest(BaseModel):
-    """Create an account and its first shop in one call."""
+    """Create an account and optionally its first shop in one call."""
 
     email: EmailStr = Field(max_length=EMAIL_MAX)
     password: Annotated[str, Field(min_length=PASSWORD_MIN, max_length=PASSWORD_MAX)]
     full_name: Annotated[str, Field(min_length=1, max_length=FULL_NAME_MAX)]
-    shop_name: Annotated[str, Field(min_length=SHOP_NAME_MIN, max_length=SHOP_NAME_MAX)]
+    shop_name: (
+        Annotated[str, Field(min_length=SHOP_NAME_MIN, max_length=SHOP_NAME_MAX)] | None
+    ) = None
 
     @field_validator("email")
     @classmethod
@@ -56,7 +58,9 @@ class RegisterRequest(BaseModel):
 
     @field_validator("shop_name")
     @classmethod
-    def _normalize_shop_name(cls, value: str) -> str:
+    def _normalize_shop_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         return utils.normalize_name(value, field="shop_name")
 
 
@@ -70,6 +74,7 @@ class LoginRequest(BaseModel):
 
     email: EmailStr = Field(max_length=EMAIL_MAX)
     password: Annotated[str, Field(min_length=1, max_length=PASSWORD_MAX)]
+    audience: Literal["storefront", "cms", "admin"] = "storefront"
 
     @field_validator("email")
     @classmethod
@@ -91,7 +96,8 @@ class SessionData(BaseModel):
     access_token: str = Field(max_length=ACCESS_TOKEN_MAX)
     token_type: Literal["bearer"]
     expires_in: int
+    audience: Literal["storefront", "cms", "admin"]
     user: UserData
-    active_shop: ShopData
-    memberships: list[MembershipData]
-    permissions: list[PermissionKey]
+    active_shop: ShopData | None = None
+    memberships: list[MembershipData] = Field(default_factory=list)
+    permissions: list[PermissionKey] = Field(default_factory=list)

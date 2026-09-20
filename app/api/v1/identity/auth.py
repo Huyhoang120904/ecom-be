@@ -94,7 +94,9 @@ async def login(
         window_seconds=LOGIN_WINDOW_SECONDS,
     )
     result = await AuthService(session).login(
-        email=payload.email, password=payload.password
+        email=payload.email,
+        password=payload.password,
+        audience=payload.audience,
     )
     _set_refresh_cookie(
         response,

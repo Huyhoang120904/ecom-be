@@ -27,7 +27,11 @@ async def signed_in(client: AsyncClient, payload: dict | None = None) -> dict[st
     await client.post("/api/v1/auth/register", json=details)
     login = await client.post(
         "/api/v1/auth/login",
-        json={"email": details["email"], "password": details["password"]},
+        json={
+            "email": details["email"],
+            "password": details["password"],
+            "audience": "cms",
+        },
     )
     return {"authorization": f"Bearer {login.json()['data']['access_token']}"}
 
@@ -85,7 +89,7 @@ class TestEffects:
         headers = await signed_in(db_async_client)
         second = await db_async_client.post(
             "/api/v1/auth/login",
-            json={"email": RETIRING["email"], "password": PASSWORD},
+            json={"email": RETIRING["email"], "password": PASSWORD, "audience": "cms"},
         )
         assert second.status_code == 200
 
@@ -103,7 +107,7 @@ class TestEffects:
 
         response = await db_async_client.post(
             "/api/v1/auth/login",
-            json={"email": RETIRING["email"], "password": PASSWORD},
+            json={"email": RETIRING["email"], "password": PASSWORD, "audience": "cms"},
         )
 
         assert response.status_code == 403
