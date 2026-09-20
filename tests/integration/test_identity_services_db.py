@@ -604,3 +604,95 @@ class TestBuyerAndAdminServices:
         assert user.email == admin_user.email
         assert shop is None
         assert "platform:metrics:read" in permissions
+
+    async def test_cms_login_skips_a_suspended_shop(self, db_session):
+        """The oldest membership is only preferred while its shop is usable."""
+
+        service = IdentityService(db_session)
+        first = await service.register(
+            email="two_shops@example.com",
+            password=PASSWORD,
+            full_name="Two Shops",
+            shop_name="First Shop",
+        )
+        second = await shop_repository.create_shop(db_session, name="Second Shop")
+        owner_role = await role_repository.get_owner_role(db_session)
+        await membership_repository.create_membership(
+            db_session,
+            user_id=first.user.id,
+            shop_id=second.id,
+            role_id=owner_role.id,
+        )
+        assert first.active_shop is not None
+        await shop_repository.set_shop_active(db_session, first.active_shop.id, False)
+
+        session = await service.login(
+            email="two_shops@example.com", password=PASSWORD, audience="cms"
+        )
+
+        assert session.active_shop is not None
+        assert session.active_shop.id == second.id
+
+    async def test_cms_login_is_refused_when_every_shop_is_suspended(self, db_session):
+        service = IdentityService(db_session)
+        registered = await service.register(
+            email="suspended_only@example.com",
+            password=PASSWORD,
+            full_name="Suspended Only",
+            shop_name="Suspended Shop",
+        )
+        assert registered.active_shop is not None
+        await shop_repository.set_shop_active(
+            db_session, registered.active_shop.id, False
+        )
+
+        with pytest.raises(AccountInactive):
+            await service.login(
+                email="suspended_only@example.com",
+                password=PASSWORD,
+                audience="cms",
+            )
+
+    async def test_refresh_refuses_when_the_bound_shop_was_suspended(self, db_session):
+        """The refusal revokes the family, so the session cannot be resurrected."""
+
+        service = IdentityService(db_session)
+        session = await service.register(
+            email="refresh_shop@example.com",
+            password=PASSWORD,
+            full_name="Refresh Shop",
+            shop_name="Refresh Shop",
+        )
+        assert session.active_shop is not None
+        await shop_repository.set_shop_active(db_session, session.active_shop.id, False)
+
+        with pytest.raises(ShopNotAccessible):
+            await service.refresh(session.refresh_token)
+
+        with pytest.raises(InvalidToken):
+            await service.refresh(session.refresh_token)
+
+    async def test_refresh_refuses_when_the_platform_role_was_revoked(self, db_session):
+        from app.cli import create_admin_account
+        from app.errors.identity import Forbidden
+
+        admin_user = await create_admin_account(
+            db_session,
+            email="demoted_admin@example.com",
+            password=PASSWORD,
+            full_name="Demoted Admin",
+        )
+        service = IdentityService(db_session)
+        session = await service.login(
+            email=admin_user.email, password=PASSWORD, audience="admin"
+        )
+
+        await membership_repository.soft_delete_platform_membership(
+            db_session, admin_user.id
+        )
+
+        with pytest.raises(Forbidden):
+            await service.refresh(session.refresh_token)
+
+        with pytest.raises(InvalidToken):
+            await service.refresh(session.refresh_token)

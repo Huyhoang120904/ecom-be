@@ -353,6 +353,41 @@ class TestAccessTokens:
                 active_shop_id=None,
             )
 
+    def test_issue_access_token_rejects_a_shop_id_for_a_non_cms_audience(self):
+        """``sid`` only means something inside one shop's perimeter."""
+
+        settings = get_settings()
+        with pytest.raises(ValueError, match="only valid for cms audience"):
+            utils.issue_access_token(
+                settings,
+                user_id=utils.new_id(),
+                audience="storefront",
+                active_shop_id=utils.new_id(),
+            )
+
+    def test_decode_access_token_rejects_an_audience_claim_that_is_not_a_string(self):
+        """A JSON array for ``aud`` is a malformed token, not a server error.
+
+        PyJWT accepts a list claim and matches it against the allowed audiences, so
+        the refusal has to happen here; testing membership in a frozenset with an
+        unhashable value would raise ``TypeError`` instead.
+        """
+
+        settings = get_settings()
+        now = datetime.now(UTC)
+        payload = {
+            "sub": utils.new_id(),
+            "aud": ["cms"],
+            "type": "access",
+            "iss": utils.ISSUER,
+            "jti": "abc",
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(hours=1)).timestamp()),
+        }
+        encoded = jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+        with pytest.raises(utils.InvalidAccessToken, match="invalid audience"):
+            utils.decode_access_token(settings, encoded)
+
     def test_decode_access_token_cms_requires_sid(self):
         settings = get_settings()
         now = datetime.now(UTC)

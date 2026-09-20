@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
     get_application_db_session,
-    get_current_principal,
     get_optional_redis_client,
+    require_seller,
 )
 from app.api.principal import Principal
 from app.api.v1.identity.common import (
@@ -148,9 +148,16 @@ async def switch_shop(
     payload: SwitchShopRequest,
     request: Request,
     response: Response,
-    principal: Annotated[Principal, Depends(get_current_principal)],
+    principal: Annotated[Principal, Depends(require_seller)],
     session: Annotated[AsyncSession, Depends(get_application_db_session)],
 ) -> BaseResponse[SessionData]:
+    """Move a seller session to another shop.
+
+    Guarded as a seller route: the token that comes back is a CMS token, so a
+    storefront or admin caller has no business asking for the swap even when the
+    account is a member of the target shop.
+    """
+
     result = await AuthService(session).switch_shop(
         user_id=uuid.UUID(principal.user_id),
         shop_id=payload.shop_id,

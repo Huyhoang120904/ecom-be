@@ -484,6 +484,20 @@ class TestBuyerAndAdminApi:
         assert response.status_code == 403
         assert response.json()["error"] == "forbidden"
 
+    async def test_a_storefront_token_cannot_switch_shop(self, db_async_client):
+        """Switching mints a CMS session, so the caller must already be in the CMS."""
+
+        token = await _buyer_token(db_async_client, "buyer_switch@example.com")
+
+        response = await db_async_client.post(
+            "/api/v1/auth/switch-shop",
+            json={"shop_id": "11111111-1111-4111-8111-111111111111"},
+            headers={"authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"] == "forbidden"
+
     async def test_a_buyer_can_upload_their_own_avatar(self, db_async_client):
         """An avatar belongs to the account, so a shop-less caller can still set one."""
 

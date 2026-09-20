@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections.abc import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,7 +52,9 @@ async def create_admin_account(
     return user
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """The command line surface, built in one place a test can interrogate."""
+
     parser = argparse.ArgumentParser(description="E-commerce backend admin CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -61,24 +64,28 @@ def main() -> None:
     admin_parser.add_argument("--email", required=True, help="Admin email address")
     admin_parser.add_argument("--password", required=True, help="Admin password")
     admin_parser.add_argument("--full-name", required=True, help="Admin full name")
+    return parser
 
-    args = parser.parse_args()
+
+async def _create_admin_from_args(args: argparse.Namespace) -> None:
+    async with SessionFactory() as session:
+        user = await create_admin_account(
+            session,
+            email=args.email,
+            password=args.password,
+            full_name=args.full_name,
+        )
+        print(
+            f"Platform administrator created successfully: {user.email} (ID: {user.id})"
+        )
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """Run one command. ``argv`` defaults to ``sys.argv[1:]``, as argparse expects."""
+
+    args = build_parser().parse_args(argv)
     if args.command == "create-admin":
-
-        async def run() -> None:
-            async with SessionFactory() as session:
-                user = await create_admin_account(
-                    session,
-                    email=args.email,
-                    password=args.password,
-                    full_name=args.full_name,
-                )
-                print(
-                    f"Platform administrator created successfully: {user.email} "
-                    f"(ID: {user.id})"
-                )
-
-        asyncio.run(run())
+        asyncio.run(_create_admin_from_args(args))
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ request, so this module has no writes.
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants.identity.rbac import SYS_ADMIN_ROLE_KEY
 from app.models.identity import Permission, Role
 
 
@@ -39,7 +40,7 @@ async def get_sys_admin_role(session: AsyncSession) -> Role:
 
     role = (
         await session.scalars(
-            select(Role).where(Role.key == "sys_admin", Role.shop_id.is_(None))
+            select(Role).where(Role.key == SYS_ADMIN_ROLE_KEY, Role.shop_id.is_(None))
         )
     ).first()
     if role is None:

@@ -76,9 +76,10 @@ def upgrade() -> None:
 
     # 5. Widen the permission key vocabulary to hierarchical keys.
     # The original constraint accepted exactly two colon-separated segments, which
-    # cannot express ``platform:metrics:read``. The replacement accepts one or more
-    # segments; the pattern is inlined rather than imported so this revision keeps
-    # meaning what it meant when it was written.
+    # cannot express ``platform:metrics:read``. The replacement accepts two or more, so
+    # the minimum is unchanged and only deeper keys are newly allowed; the pattern is
+    # inlined rather than imported so this revision keeps meaning what it meant when it
+    # was written.
     op.drop_constraint("permissions_key_ck", "permissions", type_="check")
     op.create_check_constraint(
         "permissions_key_ck",
@@ -120,7 +121,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # 1. Remove sys_admin role_permissions and role
+    # 1. Platform memberships have no meaning once the platform role is gone, and
+    # the FK is RESTRICT, so they have to go before the role does. This also lets the
+    # final step restore ``shop_id NOT NULL`` with no NULL row left behind.
+    op.execute("DELETE FROM memberships WHERE shop_id IS NULL")
+
+    # 2. Remove sys_admin role_permissions and role
     op.execute(
         """
         DELETE FROM role_permissions
@@ -135,7 +141,7 @@ def downgrade() -> None:
         """
     )
 
-    # 2. Remove seeded platform permissions
+    # 3. Remove seeded platform permissions
     perm_keys = ", ".join(f"'{key}'" for key, _ in NEW_PERMISSIONS)
     op.execute(
         f"""
@@ -143,7 +149,7 @@ def downgrade() -> None:
         """
     )
 
-    # 3. Restore the original two-segment permission key vocabulary. This runs after
+    # 4. Restore the original two-segment permission key vocabulary. This runs after
     # the platform rows are gone, because they would violate the narrower constraint.
     op.drop_constraint("permissions_key_ck", "permissions", type_="check")
     op.create_check_constraint(
@@ -152,17 +158,17 @@ def downgrade() -> None:
         "key ~ '^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$'",
     )
 
-    # 4. Drop audience column from refresh_tokens
+    # 5. Drop audience column from refresh_tokens
     op.drop_column("refresh_tokens", "audience")
 
-    # 5. Drop platform membership unique index
+    # 6. Drop platform membership unique index
     op.drop_index(
         "memberships_user_platform_live",
         table_name="memberships",
         postgresql_where=sa.text("deleted_at IS NULL AND shop_id IS NULL"),
     )
 
-    # 6. Restore shop membership unique index
+    # 7. Restore shop membership unique index
     op.drop_index(
         "memberships_user_shop_live",
         table_name="memberships",
@@ -176,7 +182,7 @@ def downgrade() -> None:
         postgresql_where=sa.text("deleted_at IS NULL"),
     )
 
-    # 7. Restore memberships.shop_id NOT NULL
+    # 8. Restore memberships.shop_id NOT NULL
     op.alter_column(
         "memberships",
         "shop_id",

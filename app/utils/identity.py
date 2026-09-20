@@ -248,6 +248,10 @@ def issue_access_token(
         raise ValueError(f"invalid audience: {audience}")
     if audience == "cms" and active_shop_id is None:
         raise ValueError("active_shop_id is required for cms audience")
+    if audience != "cms" and active_shop_id is not None:
+        # The claim is meaningless for the other two perimeters, and a token carrying
+        # one invites a reader to trust a shop binding that was never verified.
+        raise ValueError("active_shop_id is only valid for cms audience")
 
     issued = now or datetime.now(UTC)
     payload: dict[str, Any] = {
@@ -303,7 +307,10 @@ def decode_access_token(
         raise InvalidAccessToken("wrong token type")
 
     aud = claims.get("aud")
-    if aud not in VALID_AUDIENCES:
+    # ``isinstance`` first: PyJWT accepts a JSON array for ``aud``, and ``in`` on a
+    # frozenset with an unhashable value raises ``TypeError`` — a 500 for a malformed
+    # token rather than the 401 every other bad claim produces.
+    if not isinstance(aud, str) or aud not in VALID_AUDIENCES:
         raise InvalidAccessToken("invalid audience")
 
     if not isinstance(claims.get("sub"), str):

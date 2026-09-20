@@ -308,6 +308,28 @@ class TestPlatformMemberships:
             is None
         )
 
+    async def test_a_platform_membership_with_another_role_is_not_oversight(
+        self, db_session
+    ):
+        """The key is the authority: only ``sys_admin`` carries platform oversight."""
+
+        from app.models.identity import Role
+
+        user = await _make_user(db_session, "support_op@example.com")
+        support_role = Role(
+            key="platform_support", name="Platform Support", shop_id=None
+        )
+        db_session.add(support_role)
+        await db_session.flush()
+        await membership_repository.create_membership(
+            db_session, user_id=user.id, shop_id=None, role_id=support_role.id
+        )
+
+        assert (
+            await membership_repository.find_platform_membership(db_session, user.id)
+            is None
+        )
+
     async def test_a_revoked_platform_membership_resolves_to_none(self, db_session):
         user = await _make_user(db_session, "revoked_admin@example.com")
         membership = await self._grant_sys_admin(db_session, user)

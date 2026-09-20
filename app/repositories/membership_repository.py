@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from sqlalchemy import Row, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants.identity.rbac import SYS_ADMIN_ROLE_KEY
 from app.models.identity import (
     Membership,
     Permission,
@@ -125,6 +126,27 @@ async def soft_delete_memberships_for_shop(
     )
 
 
+async def soft_delete_platform_membership(
+    session: AsyncSession, user_id: uuid.UUID
+) -> None:
+    """Retire a user's platform role, keeping the row.
+
+    Demotion is an operator action rather than a request path, but the refresh flow
+    has to survive it: a session whose platform membership is gone must lose admin
+    authority, and this is how that state is created.
+    """
+
+    await session.execute(
+        update(Membership)
+        .where(
+            Membership.user_id == user_id,
+            Membership.shop_id.is_(None),
+            Membership.deleted_at.is_(None),
+        )
+        .values(deleted_at=datetime.now(UTC))
+    )
+
+
 async def effective_permissions(
     session: AsyncSession, *, user_id: uuid.UUID, shop_id: uuid.UUID
 ) -> tuple[User, Role, list[str]] | None:
@@ -169,7 +191,12 @@ async def effective_permissions(
 async def find_platform_membership(
     session: AsyncSession, user_id: uuid.UUID
 ) -> tuple[Role, list[str]] | None:
-    """Return the user's platform role and its permissions, or None."""
+    """The user's ``sys_admin`` platform role and its permissions, or None.
+
+    Filtered on the role key, not merely on ``shop_id IS NULL``: a platform
+    membership that grants some other role is not platform oversight, and the caller
+    (admin login, refresh, principal resolution) treats a found row as authority.
+    """
 
     statement = (
         select(Role, Permission.key)
@@ -185,6 +212,7 @@ async def find_platform_membership(
             Membership.shop_id.is_(None),
             Membership.deleted_at.is_(None),
             Role.deleted_at.is_(None),
+            Role.key == SYS_ADMIN_ROLE_KEY,
         )
     )
     rows = (await session.execute(statement)).all()

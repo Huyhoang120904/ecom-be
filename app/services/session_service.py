@@ -17,7 +17,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.settings import Settings
-from app.errors.identity import NotAMember
+from app.errors.identity import NotAMember, ShopNotAccessible
 from app.models.identity import Role, Shop, User
 from app.repositories import membership_repository, refresh_token_repository
 from app.utils import identity as utils
@@ -61,6 +61,11 @@ async def issue_session(
         if membership is None:
             raise NotAMember
         shop, _role = membership
+        if not shop.is_active:
+            # A suspended shop hosts no session: the principal guard and the refresh
+            # path both refuse it, so issuing a token here would create a session that
+            # dies on first use.
+            raise ShopNotAccessible
 
         resolved = await membership_repository.effective_permissions(
             session, user_id=user.id, shop_id=shop_id

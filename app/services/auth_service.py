@@ -138,10 +138,14 @@ class AuthService:
             memberships = await membership_repository.list_memberships(
                 self._session, user.id
             )
-            if not memberships:
-                # An account with no live shop cannot do anything in the CMS.
+            # Only a live, unsuspended shop can host a session. Picking the oldest
+            # membership regardless would mint a token the very next request refuses,
+            # and the refresh path already re-checks this, so login has to agree.
+            active_shops = [shop for shop, _role in memberships if shop.is_active]
+            if not active_shops:
+                # An account with no usable shop cannot do anything in the CMS.
                 raise AccountInactive
-            shop_id = memberships[0][0].id
+            shop_id = active_shops[0].id
         elif audience == "admin":
             platform_membership = await membership_repository.find_platform_membership(
                 self._session, user.id
@@ -217,7 +221,11 @@ class AuthService:
         family_id = stored.family_id
         await refresh_token_repository.delete_expired_refresh_tokens(self._session)
 
-        token_aud = getattr(stored, "audience", "cms") or "cms"
+        token_aud = stored.audience
+        if token_aud not in utils.VALID_AUDIENCES:
+            # A stored value the software no longer recognises is a corrupt row, not a
+            # storefront session; treating it as one would silently widen a perimeter.
+            raise InvalidToken
         target_shop_id: uuid.UUID | None = None
         if token_aud == "cms":
             if stored.active_shop_id is None:
@@ -245,8 +253,10 @@ class AuthService:
                 await self._session.commit()
                 raise Forbidden
             target_shop_id = None
-        else:  # storefront
+        elif token_aud == "storefront":
             target_shop_id = None
+        else:  # unreachable: the audience is validated above, kept total on purpose
+            raise InvalidToken
 
         result = await issue_session(
             self._session,

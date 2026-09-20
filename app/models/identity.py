@@ -45,7 +45,7 @@ from app.infrastructure.db.mixins import (
 
 SLUG_PATTERN = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 ROLE_KEY_PATTERN = r"^[a-z][a-z0-9_]*$"
-# One or more colon-separated segments, so a capability can be hierarchical:
+# Two or more colon-separated segments, so a capability can be hierarchical:
 # ``shop:read`` and ``platform:metrics:read`` are both keys. The subject before the
 # last colon names what is acted on, and the last segment names the action.
 PERMISSION_KEY_PATTERN = r"^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)+$"
