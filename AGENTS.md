@@ -15,7 +15,7 @@
   ```bash
   uv run ruff format --check .
   uv run ruff check .
-  uv run mypy src
+  uv run mypy app alembic
   uv run pytest -q
   uv lock --check
   ```
@@ -28,6 +28,7 @@ needs, and a change's layer is decided by what the change does.
 ```
 app/
 ├── main.py                     # app factory, lifespan, middleware wiring
+├── cli.py                      # operator commands (`create-admin`), argparse only
 ├── config/settings.py          # the validated settings object
 ├── core/                       # cross-cutting: errors.py, logging.py
 ├── infrastructure/             # external systems
@@ -94,6 +95,18 @@ endpoint plus a parallel naming convention in the frontend's generated types.
 envelope's own fields.
 
 Errors are not enveloped: they keep `{"error", "message"}` from `core/errors.py`.
+
+### Audience perimeters
+
+An access token declares exactly one audience — `storefront`, `cms`, or `admin` —
+and `get_current_principal` refuses to build a caller whose token was issued for a
+different one. Guards compose on top of it: `require_audience(...)`,
+`require_seller`, `require_platform_admin`, and the pre-existing
+`require_permissions`/`require_roles`. A platform administrator
+(`is_platform_admin=True`) satisfies every permission check, so a new oversight
+route does not enumerate grants. CMS clients must ask for `"audience": "cms"` at
+login; the default is `storefront`, because a public storefront sign-in is the
+common case.
 
 ### Layer rules
 

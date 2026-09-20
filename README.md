@@ -108,7 +108,7 @@ startup and application startup stay independent.
 | Check formatting (CI gate) | `uv run ruff format --check .` |
 | Lint | `uv run ruff check .` |
 | Lint and auto-fix | `uv run ruff check --fix .` |
-| Type-check | `uv run mypy src alembic` |
+| Type-check | `uv run mypy app alembic` |
 | Run the whole suite | `uv run pytest -q` |
 | Run one test file | `uv run pytest -q tests/unit/test_config.py` |
 | Run the database suite | `uv run pytest -q -m db` (needs `docker compose up -d --wait`) |
@@ -117,6 +117,7 @@ startup and application startup stay independent.
 | Show the current revision | `uv run alembic current` |
 | Create a migration | `uv run alembic revision --autogenerate -m "add order table"` |
 | Start the dev server | `uv run uvicorn app.main:app --reload --port 8000` |
+| Bootstrap a platform admin | `uv run python -m app.cli create-admin --email admin@example.com --password '<secret>' --full-name 'System Administrator'` |
 
 Formatting, linting, and type-check rules live in `pyproject.toml`
 (`[tool.ruff]`, `[tool.mypy]`, `[tool.pytest.ini_options]`) and are the same
@@ -159,9 +160,12 @@ exports the resulting `metadata` object, which is what `alembic/env.py` assigns
 to `target_metadata`. A model class that is not imported there is invisible to
 autogenerate.
 
-The scaffold ships two revisions: an identity schema (accounts, shops, roles,
-permissions, memberships, refresh tokens) and a seed that installs the permission
-vocabulary and the three system roles. Adding a persisted feature means:
+The scaffold ships three revisions: an identity schema (accounts, shops, roles,
+permissions, memberships, refresh tokens), a seed that installs the permission
+vocabulary and the three shop system roles, and an admin/buyer revision that makes
+`memberships.shop_id` nullable for platform roles, seeds the `platform:*`
+permissions plus `sys_admin`, and records the token audience on every refresh
+token. Adding a persisted feature means:
 
 1. Write `app/models/<feature>.py`, declaring the model on
    `app.infrastructure.db.base.Base` and taking the mixins from
@@ -208,12 +212,12 @@ other route requires a bearer token.
 | `GET /health/live` | public | I/O-free liveness; answers as long as the process is up |
 | `GET /health/ready` | public | Readiness; probes PostgreSQL and Redis, `200` when both are `ok`, `503` with the same envelope otherwise |
 | `GET /api/v1/openapi.json` | public | Generated OpenAPI document |
-| `POST /api/v1/auth/register` | public | Create an account and its first shop, then sign in |
-| `POST /api/v1/auth/login` | public | Start a session |
+| `POST /api/v1/auth/register` | public | Create an account, its first shop when `shop_name` is given, then sign in |
+| `POST /api/v1/auth/login` | public | Start a session for the requested audience (`storefront`, `cms`, `admin`) |
 | `POST /api/v1/auth/refresh` | cookie | Rotate the refresh cookie and issue a new access token |
 | `POST /api/v1/auth/logout` | cookie | End the session. Always `204` |
 | `POST /api/v1/auth/switch-shop` | bearer | Move the session to another shop the caller belongs to |
-| `GET /api/v1/auth/me` | bearer | The caller, their memberships, the active shop, effective permissions |
+| `GET /api/v1/auth/me` | bearer | The caller, their audience, memberships, active shop, effective permissions |
 | `PATCH /api/v1/auth/me` | bearer | Update the caller's own profile; omitted keys are left alone |
 | `POST /api/v1/auth/me/avatar` | bearer | Replace the avatar (`multipart/form-data`) |
 | `DELETE /api/v1/auth/me/avatar` | bearer | Remove the avatar. Idempotent |
@@ -242,6 +246,44 @@ credentials redacted before any handler sees them.
 Two mechanical gates hold the contract to that: a string property with no
 `maxLength` and a `2xx` body that is not a `BaseResponse` both fail the
 suite.
+
+## Identities, audiences, and platform admins
+
+One `users` row is one account; what that account may do is decided by the
+audience its access token was issued for, never by a role embedded in the token.
+
+| Audience | Who it is | `sid` claim | Token carries |
+| --- | --- | --- | --- |
+| `storefront` | A buyer | absent | nothing beyond the subject |
+| `cms` | A seller acting inside one shop | required | the shop the session is scoped to |
+| `admin` | A platform administrator | absent | nothing; authority comes from the platform membership |
+
+`POST /api/v1/auth/register` creates a buyer when `shop_name` is omitted and a
+seller — account, shop, and `owner` membership in one transaction — when it is
+given. `POST /api/v1/auth/login` defaults to `audience="storefront"`, so a CMS
+client must send `"audience": "cms"` explicitly; asking for `"admin"` without a
+platform membership is a `403 forbidden`. A refresh token stores the audience it
+was issued for and replays it, so a buyer session cannot be refreshed into a
+seller one, and a `storefront` token is refused on CMS routes even though the same
+account owns a shop.
+
+Platform administrators are never self-registered. The seeded `sys_admin` role
+holds no shop (`memberships.shop_id IS NULL`), owns every seeded permission, and
+answers `True` to every `Principal.has()` check. Bootstrap one with the CLI:
+
+```bash
+uv run python -m app.cli create-admin \
+  --email admin@example.com --password '<secret>' --full-name 'System Administrator'
+```
+
+The command is idempotent: an existing account keeps its id and gains the platform
+membership only if it does not already have one.
+
+Permission keys are hierarchical — `<subject>[:<subject>]:<action>` — so a platform
+capability reads `platform:metrics:read` while a shop one reads `shop:read`. The
+vocabulary is seeded by migration rather than by application code, which is why
+`tests/integration/test_identity_seed_db.py` asserts the whole set against the
+database.
 
 ## Media
 
