@@ -30,6 +30,25 @@ async def get_owner_role(session: AsyncSession) -> Role:
     return role
 
 
+async def get_sys_admin_role(session: AsyncSession) -> Role:
+    """The seeded ``sys_admin`` system role.
+
+    Raises rather than returning ``None``: its absence means the seed migration has
+    not run, which is a deployment state, not a request-level error.
+    """
+
+    role = (
+        await session.scalars(
+            select(Role).where(Role.key == "sys_admin", Role.shop_id.is_(None))
+        )
+    ).first()
+    if role is None:
+        raise RuntimeError(
+            "the sys_admin system role is missing; run `alembic upgrade head`"
+        )
+    return role
+
+
 async def get_role_by_key(session: AsyncSession, key: str) -> Role | None:
     return (
         await session.scalars(

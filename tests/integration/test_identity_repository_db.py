@@ -271,6 +271,63 @@ class TestMembershipsAndPermissions:
         assert "shop:update" not in resolved[2]
 
 
+class TestPlatformMemberships:
+    """Platform roles hang off a membership with no shop, so the lookup differs."""
+
+    async def _grant_sys_admin(self, db_session, user):
+        admin_role = await role_repository.get_sys_admin_role(db_session)
+        return await membership_repository.create_membership(
+            db_session, user_id=user.id, shop_id=None, role_id=admin_role.id
+        )
+
+    async def test_resolves_the_platform_role_and_its_permission_keys(self, db_session):
+        user = await _make_user(db_session, "platform_op@example.com")
+        await self._grant_sys_admin(db_session, user)
+
+        resolved = await membership_repository.find_platform_membership(
+            db_session, user.id
+        )
+
+        assert resolved is not None
+        role, permissions = resolved
+        assert role.key == "sys_admin"
+        assert role.shop_id is None
+        assert "platform:metrics:read" in permissions
+        assert "platform:shops:manage" in permissions
+
+    async def test_a_shop_membership_is_not_a_platform_membership(self, db_session):
+        user = await _make_user(db_session, "seller_only@example.com")
+        shop = await shop_repository.create_shop(db_session, name="Seller Shop")
+        owner_role = await role_repository.get_owner_role(db_session)
+        await membership_repository.create_membership(
+            db_session, user_id=user.id, shop_id=shop.id, role_id=owner_role.id
+        )
+
+        assert (
+            await membership_repository.find_platform_membership(db_session, user.id)
+            is None
+        )
+
+    async def test_a_revoked_platform_membership_resolves_to_none(self, db_session):
+        user = await _make_user(db_session, "revoked_admin@example.com")
+        membership = await self._grant_sys_admin(db_session, user)
+        membership.deleted_at = datetime.now(UTC)
+        await db_session.flush()
+
+        assert (
+            await membership_repository.find_platform_membership(db_session, user.id)
+            is None
+        )
+
+    async def test_the_seeded_sys_admin_role_is_platform_owned(self, db_session):
+        """Found by key, owned by no shop: what the admin login path asserts."""
+
+        role = await role_repository.get_sys_admin_role(db_session)
+
+        assert role.key == "sys_admin"
+        assert role.shop_id is None
+
+
 class TestRefreshTokens:
     async def _issue(self, db_session, user, shop, raw: str = "opaque-token"):
         return await refresh_token_repository.create_refresh_token(
@@ -298,6 +355,22 @@ class TestRefreshTokens:
                 db_session, hash_refresh_token("nope")
             )
         ) is None
+
+    async def test_a_token_records_the_audience_it_was_issued_for(self, db_session):
+        """The refresh flow replays this value, so it has to survive the round trip."""
+
+        user = await _make_user(db_session)
+        issued = await refresh_token_repository.create_refresh_token(
+            db_session,
+            user_id=user.id,
+            active_shop_id=None,
+            audience="storefront",
+            token_hash=hash_refresh_token("buyer-token"),
+            expires_at=datetime.now(UTC) + timedelta(days=30),
+        )
+
+        assert issued.audience == "storefront"
+        assert issued.active_shop_id is None
 
     async def test_the_raw_token_is_never_stored(self, db_session):
         user = await _make_user(db_session)

@@ -31,7 +31,7 @@ async def create_membership(
     session: AsyncSession,
     *,
     user_id: uuid.UUID,
-    shop_id: uuid.UUID,
+    shop_id: uuid.UUID | None,
     role_id: uuid.UUID,
 ) -> Membership:
     membership = Membership(user_id=user_id, shop_id=shop_id, role_id=role_id)
@@ -164,3 +164,32 @@ async def effective_permissions(
     user, role = rows[0][0], rows[0][1]
     keys = sorted({row[2] for row in rows if row[2] is not None})
     return user, role, keys
+
+
+async def find_platform_membership(
+    session: AsyncSession, user_id: uuid.UUID
+) -> tuple[Role, list[str]] | None:
+    """Return the user's platform role and its permissions, or None."""
+
+    statement = (
+        select(Role, Permission.key)
+        # Membership is named as the starting point because Role and Permission are
+        # both in the select list, and only an explicit left side tells the compiler
+        # which table the platform-role join hangs off.
+        .select_from(Membership)
+        .join(Role, Role.id == Membership.role_id)
+        .outerjoin(RolePermission, RolePermission.role_id == Role.id)
+        .outerjoin(Permission, Permission.id == RolePermission.permission_id)
+        .where(
+            Membership.user_id == user_id,
+            Membership.shop_id.is_(None),
+            Membership.deleted_at.is_(None),
+            Role.deleted_at.is_(None),
+        )
+    )
+    rows = (await session.execute(statement)).all()
+    if not rows:
+        return None
+    role = rows[0][0]
+    permissions = sorted({row[1] for row in rows if row[1] is not None})
+    return role, permissions
