@@ -147,6 +147,24 @@ async def soft_delete_platform_membership(
     )
 
 
+async def get_live_platform_membership(
+    session: AsyncSession, user_id: uuid.UUID
+) -> Membership | None:
+    """The user's live platform membership row, whatever role it holds.
+
+    ``find_platform_membership`` answers "is this an administrator"; this answers
+    "is there a platform row at all", which is what a promotion has to know before it
+    inserts a second one, and what a test has to read to prove it did not.
+    """
+
+    statement = select(Membership).where(
+        Membership.user_id == user_id,
+        Membership.shop_id.is_(None),
+        Membership.deleted_at.is_(None),
+    )
+    return (await session.execute(statement)).scalars().first()
+
+
 async def upsert_platform_membership(
     session: AsyncSession, *, user_id: uuid.UUID, role_id: uuid.UUID
 ) -> None:

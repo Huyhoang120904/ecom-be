@@ -132,7 +132,7 @@ async def test_create_admin_account_promotes_an_existing_platform_membership(
     support_role = Role(key="platform_support", name="Platform Support", shop_id=None)
     db_session.add(support_role)
     await db_session.flush()
-    await membership_repository.create_membership(
+    original = await membership_repository.create_membership(
         db_session, user_id=user.id, shop_id=None, role_id=support_role.id
     )
 
@@ -146,3 +146,50 @@ async def test_create_admin_account_promotes_an_existing_platform_membership(
     resolved = await membership_repository.find_platform_membership(db_session, user.id)
     assert resolved is not None
     assert resolved[0].key == "sys_admin"
+
+    # The same row, promoted: retiring the old one and inserting a replacement would
+    # leave the same resolved role behind, so the identity is what this asserts.
+    promoted = await membership_repository.get_live_platform_membership(
+        db_session, user.id
+    )
+    assert promoted is not None
+    assert promoted.id == original.id
+
+
+@pytest.mark.anyio
+@pytest.mark.db
+async def test_create_admin_account_inserts_after_a_soft_deleted_membership(
+    db_session: AsyncSession,
+):
+    """A retired platform row does not block a new one: the partial index ignores it."""
+
+    user = await user_repository.create_user(
+        db_session,
+        email="returning_admin@example.com",
+        password_hash="x",
+        full_name="Returning Admin",
+    )
+    await create_admin_account(
+        db_session,
+        email="returning_admin@example.com",
+        password=PASSWORD,
+        full_name="Returning Admin",
+    )
+    retired = await membership_repository.get_live_platform_membership(
+        db_session, user.id
+    )
+    assert retired is not None
+    await membership_repository.soft_delete_platform_membership(db_session, user.id)
+
+    await create_admin_account(
+        db_session,
+        email="returning_admin@example.com",
+        password=PASSWORD,
+        full_name="Returning Admin",
+    )
+
+    reinstated = await membership_repository.get_live_platform_membership(
+        db_session, user.id
+    )
+    assert reinstated is not None
+    assert reinstated.id != retired.id

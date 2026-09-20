@@ -276,16 +276,6 @@ class AuthService:
         )
         await self._session.commit()
         return result
-        # Mark the presented token replaced only after the new row exists, so
-        # ``replaced_by_id`` always points at something.
-        newest = await refresh_token_repository.find_refresh_token(
-            self._session, utils.hash_refresh_token(result.refresh_token)
-        )
-        await refresh_token_repository.revoke_refresh_token(
-            self._session, stored, newest
-        )
-        await self._session.commit()
-        return result
 
     async def logout(self, token: str | None) -> None:
         """Revoke the token's whole family.

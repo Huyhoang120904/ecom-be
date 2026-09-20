@@ -669,6 +669,21 @@ class TestBuyerAndAdminServices:
         # that only revoked the presented row would leave the live sibling usable.
         rotated = await service.refresh(session.refresh_token)
         assert rotated.active_shop is not None
+        live = await refresh_token_repository.find_refresh_token(
+            db_session, hash_refresh_token(rotated.refresh_token)
+        )
+        assert live is not None
+        # A *second* live row in the same family, so a refusal that revoked only the
+        # token it was handed would leave something usable behind and fail here.
+        await refresh_token_repository.create_refresh_token(
+            db_session,
+            user_id=live.user_id,
+            active_shop_id=live.active_shop_id,
+            audience=live.audience,
+            token_hash=hash_refresh_token("sibling-token"),
+            expires_at=live.expires_at,
+            family_id=live.family_id,
+        )
         await shop_repository.set_shop_active(db_session, rotated.active_shop.id, False)
 
         with pytest.raises(ShopNotAccessible):
@@ -678,6 +693,10 @@ class TestBuyerAndAdminServices:
             db_session, hash_refresh_token(rotated.refresh_token)
         )
         assert presented is not None and presented.revoked_at is not None
+        sibling = await refresh_token_repository.find_refresh_token(
+            db_session, hash_refresh_token("sibling-token")
+        )
+        assert sibling is not None and sibling.revoked_at is not None
         assert (
             await refresh_token_repository.list_unrevoked_family(
                 db_session, presented.family_id
@@ -704,6 +723,19 @@ class TestBuyerAndAdminServices:
             email=admin_user.email, password=PASSWORD, audience="admin"
         )
         rotated = await service.refresh(session.refresh_token)
+        live = await refresh_token_repository.find_refresh_token(
+            db_session, hash_refresh_token(rotated.refresh_token)
+        )
+        assert live is not None
+        await refresh_token_repository.create_refresh_token(
+            db_session,
+            user_id=live.user_id,
+            active_shop_id=live.active_shop_id,
+            audience=live.audience,
+            token_hash=hash_refresh_token("admin-sibling-token"),
+            expires_at=live.expires_at,
+            family_id=live.family_id,
+        )
 
         await membership_repository.soft_delete_platform_membership(
             db_session, admin_user.id
@@ -716,6 +748,10 @@ class TestBuyerAndAdminServices:
             db_session, hash_refresh_token(rotated.refresh_token)
         )
         assert presented is not None and presented.revoked_at is not None
+        sibling = await refresh_token_repository.find_refresh_token(
+            db_session, hash_refresh_token("admin-sibling-token")
+        )
+        assert sibling is not None and sibling.revoked_at is not None
         assert (
             await refresh_token_repository.list_unrevoked_family(
                 db_session, presented.family_id
@@ -726,10 +762,16 @@ class TestBuyerAndAdminServices:
         with pytest.raises(InvalidToken):
             await service.refresh(rotated.refresh_token)
 
+    @pytest.mark.parametrize("bad_audience", ["legacy", ""])
     async def test_refresh_refuses_an_audience_the_software_does_not_recognise(
-        self, db_session
+        self, db_session, bad_audience
     ):
-        """A corrupt stored value must not be replayed as a wider perimeter."""
+        """A corrupt stored value must not be replayed as a wider perimeter.
+
+        The session is shop-bound and one of the stored values is falsy, because the
+        fallback this guards against (``stored.audience or "cms"``) would turn ``""``
+        into a CMS session for that shop — the widening, not just the wrong label.
+        """
 
         import uuid
         from datetime import UTC, datetime, timedelta
@@ -738,16 +780,17 @@ class TestBuyerAndAdminServices:
 
         service = IdentityService(db_session)
         registered = await service.register(
-            email="corrupt_audience@example.com",
+            email=f"corrupt_audience_{bad_audience or 'empty'}@example.com",
             password=PASSWORD,
             full_name="Corrupt Audience",
-            shop_name=None,
+            shop_name="Corrupt Shop",
         )
+        assert registered.active_shop is not None
         await refresh_token_repository.create_refresh_token(
             db_session,
             user_id=registered.user.id,
-            active_shop_id=None,
-            audience="legacy",
+            active_shop_id=registered.active_shop.id,
+            audience=bad_audience,
             token_hash=hash_refresh_token("corrupt-audience-token"),
             expires_at=datetime.now(UTC) + timedelta(days=30),
             family_id=uuid.uuid4(),
