@@ -11,7 +11,14 @@ import pytest
 from fastapi import Depends, FastAPI
 from httpx import ASGITransport, AsyncClient
 
-from app.api.deps import get_current_principal, require_permissions, require_roles
+from app.api.deps import (
+    get_current_principal,
+    require_audience,
+    require_permissions,
+    require_platform_admin,
+    require_roles,
+    require_seller,
+)
 from app.api.principal import Principal
 from app.core.errors import register_exception_handlers
 from app.errors.identity import (
@@ -26,17 +33,22 @@ pytestmark = pytest.mark.anyio
 
 def _principal(
     *,
+    audience: str = "cms",
     permissions: frozenset[str] = frozenset({"shop:read"}),
     roles: tuple[str, ...] = ("owner",),
     shop_is_active: bool = True,
+    is_platform_admin: bool = False,
+    active_shop_id: str | None = "22222222-2222-4222-8222-222222222222",
 ) -> Principal:
     return Principal(
         user_id="11111111-1111-4111-8111-111111111111",
-        active_shop_id="22222222-2222-4222-8222-222222222222",
+        active_shop_id=active_shop_id,
         email="seller@example.com",
+        audience=audience,
         roles=roles,
         permissions=permissions,
         shop_is_active=shop_is_active,
+        is_platform_admin=is_platform_admin,
     )
 
 
@@ -116,6 +128,21 @@ class TestPrincipalShape:
 
         assert isinstance(principal.permissions, frozenset)
         assert not hasattr(principal.permissions, "add")
+
+    def test_platform_admin_bypasses_all_permissions(self):
+        admin = _principal(
+            audience="admin",
+            roles=("sys_admin",),
+            permissions=frozenset(),
+            is_platform_admin=True,
+            active_shop_id=None,
+        )
+
+        assert admin.has("random:nonexistent:permission")
+        assert admin.has("shop:update", "dashboard:read")
+        assert admin.has_any("random:permission")
+        assert admin.has_role("sys_admin")
+        assert not admin.has_role("owner")
 
 
 class TestRequirePermissions:
@@ -216,3 +243,97 @@ class TestRequireRoles:
         )
 
         assert response.status_code == 403
+
+
+class TestRequireAudience:
+    async def test_matching_audience_passes(self):
+        principal = _principal(audience="storefront")
+        response = await _get(
+            _guarded_app(require_audience("storefront"), principal=principal)
+        )
+
+        assert response.status_code == 200
+
+    async def test_one_of_several_allowed_audiences_passes(self):
+        principal = _principal(audience="cms")
+        response = await _get(
+            _guarded_app(require_audience("storefront", "cms"), principal=principal)
+        )
+
+        assert response.status_code == 200
+
+    async def test_unmatched_audience_is_forbidden(self):
+        principal = _principal(audience="storefront")
+        response = await _get(
+            _guarded_app(require_audience("cms"), principal=principal)
+        )
+
+        assert response.status_code == 403
+        assert response.json() == {
+            "error": "forbidden",
+            "message": "You do not have permission to do that",
+        }
+
+
+class TestRequirePlatformAdmin:
+    async def test_platform_admin_passes(self):
+        admin = _principal(
+            audience="admin",
+            roles=("sys_admin",),
+            is_platform_admin=True,
+            active_shop_id=None,
+        )
+        response = await _get(_guarded_app(require_platform_admin, principal=admin))
+
+        assert response.status_code == 200
+
+    async def test_non_admin_is_forbidden(self):
+        seller = _principal(audience="cms", is_platform_admin=False)
+        response = await _get(_guarded_app(require_platform_admin, principal=seller))
+
+        assert response.status_code == 403
+        assert response.json()["error"] == "forbidden"
+
+    async def test_admin_with_wrong_audience_is_forbidden(self):
+        mismatched = _principal(
+            audience="cms",
+            roles=("sys_admin",),
+            is_platform_admin=True,
+        )
+        response = await _get(
+            _guarded_app(require_platform_admin, principal=mismatched)
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"] == "forbidden"
+
+
+class TestRequireSeller:
+    async def test_seller_with_active_shop_passes(self):
+        seller = _principal(
+            audience="cms",
+            active_shop_id="22222222-2222-4222-8222-222222222222",
+        )
+        response = await _get(_guarded_app(require_seller, principal=seller))
+
+        assert response.status_code == 200
+
+    async def test_storefront_buyer_is_forbidden(self):
+        buyer = _principal(
+            audience="storefront",
+            active_shop_id=None,
+        )
+        response = await _get(_guarded_app(require_seller, principal=buyer))
+
+        assert response.status_code == 403
+        assert response.json()["error"] == "forbidden"
+
+    async def test_seller_without_active_shop_is_forbidden(self):
+        broken_seller = _principal(
+            audience="cms",
+            active_shop_id=None,
+        )
+        response = await _get(_guarded_app(require_seller, principal=broken_seller))
+
+        assert response.status_code == 403
+        assert response.json()["error"] == "forbidden"

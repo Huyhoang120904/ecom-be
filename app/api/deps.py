@@ -130,6 +130,45 @@ async def get_current_principal(
 
     try:
         user_id = UUID(claims["sub"])
+    except (KeyError, ValueError) as error:
+        raise InvalidToken from error
+
+    aud = claims.get("aud")
+    if aud not in utils.VALID_AUDIENCES:
+        raise InvalidToken
+
+    user = await user_repository.get_user(session, user_id)
+    if user is None or user.deactivated_at is not None:
+        raise AccountInactive
+
+    if aud == "storefront":
+        return Principal(
+            user_id=str(user.id),
+            email=user.email,
+            audience="storefront",
+            active_shop_id=None,
+            is_platform_admin=False,
+        )
+
+    if aud == "admin":
+        platform_membership = await membership_repository.find_platform_membership(
+            session, user.id
+        )
+        if platform_membership is None:
+            raise Forbidden
+        role, permissions = platform_membership
+        return Principal(
+            user_id=str(user.id),
+            email=user.email,
+            audience="admin",
+            active_shop_id=None,
+            roles=(role.key,),
+            permissions=frozenset(permissions),
+            is_platform_admin=True,
+        )
+
+    # aud == "cms"
+    try:
         shop_id = UUID(claims["sid"])
     except (KeyError, ValueError) as error:
         raise InvalidToken from error
@@ -138,30 +177,22 @@ async def get_current_principal(
         session, user_id=user_id, shop_id=shop_id
     )
     if resolved is None:
-        # Three different states collapse into one query result, and they deserve
-        # different answers. An inactive account tells the client to stop retrying;
-        # an inaccessible shop tells it to pick another.
-        user = await user_repository.get_user(session, user_id)
-        if user is None or user.deactivated_at is not None:
-            raise AccountInactive
         raise ShopNotAccessible
 
     user, role, permissions = resolved
     shop = await shop_repository.get_shop(session, shop_id)
-    if shop is None:
-        raise ShopNotAccessible
-    if not shop.is_active:
-        # Suspension is an operator action, distinct from deletion: the token is
-        # still valid, the shop is just not usable right now.
+    if shop is None or not shop.is_active:
         raise ShopNotAccessible
 
     return Principal(
         user_id=str(user.id),
         active_shop_id=str(shop.id),
         email=user.email,
+        audience="cms",
         roles=(role.key,),
         permissions=frozenset(permissions),
         shop_is_active=shop.is_active,
+        is_platform_admin=False,
     )
 
 
@@ -200,6 +231,39 @@ def require_roles(*keys: str) -> Callable[..., Awaitable[Principal]]:
         return principal
 
     return dependency
+
+
+def require_audience(*allowed_audiences: str) -> Callable[..., Awaitable[Principal]]:
+    """Enforce that the caller's token was issued for one of the allowed audiences."""
+
+    async def dependency(
+        principal: Annotated[Principal, Depends(get_current_principal)],
+    ) -> Principal:
+        if principal.audience not in allowed_audiences:
+            raise Forbidden
+        return principal
+
+    return dependency
+
+
+async def require_platform_admin(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+) -> Principal:
+    """Enforce that the caller is an active platform administrator."""
+
+    if not principal.is_platform_admin or principal.audience != "admin":
+        raise Forbidden
+    return principal
+
+
+async def require_seller(
+    principal: Annotated[Principal, Depends(get_current_principal)],
+) -> Principal:
+    """Enforce that the caller is acting in a seller (CMS) shop context."""
+
+    if principal.audience != "cms" or principal.active_shop_id is None:
+        raise Forbidden
+    return principal
 
 
 def get_settings_dependency() -> Settings:
