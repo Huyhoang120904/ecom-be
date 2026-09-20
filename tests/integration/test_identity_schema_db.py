@@ -311,7 +311,7 @@ async def test_the_constraint_accepts_a_new_hierarchical_permission_key(db_sessi
     ],
 )
 async def test_malformed_permission_keys_are_rejected(db_session, bad_key):
-    """One segment or more, but never an empty one and never a capital letter.
+    """Two segments or more, but never an empty one and never a capital letter.
 
     Parametrized rather than looped: the first rejected insert aborts the
     transaction, so a second statement in the same test could not be judged on its

@@ -654,7 +654,9 @@ class TestBuyerAndAdminServices:
             )
 
     async def test_refresh_refuses_when_the_bound_shop_was_suspended(self, db_session):
-        """The refusal revokes the family, so the session cannot be resurrected."""
+        """The refusal kills the whole family, not only the token that was presented."""
+
+        from app.utils.identity import hash_refresh_token
 
         service = IdentityService(db_session)
         session = await service.register(
@@ -663,18 +665,33 @@ class TestBuyerAndAdminServices:
             full_name="Refresh Shop",
             shop_name="Refresh Shop",
         )
-        assert session.active_shop is not None
-        await shop_repository.set_shop_active(db_session, session.active_shop.id, False)
+        # Rotate once, so the family holds a live row *and* a replaced one: a refusal
+        # that only revoked the presented row would leave the live sibling usable.
+        rotated = await service.refresh(session.refresh_token)
+        assert rotated.active_shop is not None
+        await shop_repository.set_shop_active(db_session, rotated.active_shop.id, False)
 
         with pytest.raises(ShopNotAccessible):
-            await service.refresh(session.refresh_token)
+            await service.refresh(rotated.refresh_token)
+
+        presented = await refresh_token_repository.find_refresh_token(
+            db_session, hash_refresh_token(rotated.refresh_token)
+        )
+        assert presented is not None and presented.revoked_at is not None
+        assert (
+            await refresh_token_repository.list_unrevoked_family(
+                db_session, presented.family_id
+            )
+            == []
+        )
 
         with pytest.raises(InvalidToken):
-            await service.refresh(session.refresh_token)
+            await service.refresh(rotated.refresh_token)
 
     async def test_refresh_refuses_when_the_platform_role_was_revoked(self, db_session):
         from app.cli import create_admin_account
         from app.errors.identity import Forbidden
+        from app.utils.identity import hash_refresh_token
 
         admin_user = await create_admin_account(
             db_session,
@@ -686,13 +703,55 @@ class TestBuyerAndAdminServices:
         session = await service.login(
             email=admin_user.email, password=PASSWORD, audience="admin"
         )
+        rotated = await service.refresh(session.refresh_token)
 
         await membership_repository.soft_delete_platform_membership(
             db_session, admin_user.id
         )
 
         with pytest.raises(Forbidden):
-            await service.refresh(session.refresh_token)
+            await service.refresh(rotated.refresh_token)
+
+        presented = await refresh_token_repository.find_refresh_token(
+            db_session, hash_refresh_token(rotated.refresh_token)
+        )
+        assert presented is not None and presented.revoked_at is not None
+        assert (
+            await refresh_token_repository.list_unrevoked_family(
+                db_session, presented.family_id
+            )
+            == []
+        )
 
         with pytest.raises(InvalidToken):
-            await service.refresh(session.refresh_token)
+            await service.refresh(rotated.refresh_token)
+
+    async def test_refresh_refuses_an_audience_the_software_does_not_recognise(
+        self, db_session
+    ):
+        """A corrupt stored value must not be replayed as a wider perimeter."""
+
+        import uuid
+        from datetime import UTC, datetime, timedelta
+
+        from app.utils.identity import hash_refresh_token
+
+        service = IdentityService(db_session)
+        registered = await service.register(
+            email="corrupt_audience@example.com",
+            password=PASSWORD,
+            full_name="Corrupt Audience",
+            shop_name=None,
+        )
+        await refresh_token_repository.create_refresh_token(
+            db_session,
+            user_id=registered.user.id,
+            active_shop_id=None,
+            audience="legacy",
+            token_hash=hash_refresh_token("corrupt-audience-token"),
+            expires_at=datetime.now(UTC) + timedelta(days=30),
+            family_id=uuid.uuid4(),
+        )
+
+        with pytest.raises(InvalidToken):
+            await service.refresh("corrupt-audience-token")

@@ -38,16 +38,11 @@ async def create_admin_account(
         )
 
     sys_admin_role = await role_repository.get_sys_admin_role(session)
-    existing_membership = await membership_repository.find_platform_membership(
-        session, user.id
+    # Idempotent by name and by consequence: the account keeps its id, and the
+    # platform membership is updated in place rather than duplicated.
+    await membership_repository.upsert_platform_membership(
+        session, user_id=user.id, role_id=sys_admin_role.id
     )
-    if existing_membership is None:
-        await membership_repository.create_membership(
-            session,
-            user_id=user.id,
-            shop_id=None,
-            role_id=sys_admin_role.id,
-        )
     await session.commit()
     return user
 

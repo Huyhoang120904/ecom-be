@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import cli
 from app.cli import create_admin_account
-from app.repositories import membership_repository
+from app.repositories import membership_repository, user_repository
 
 PASSWORD = "SuperSecretPassword123!"
 
@@ -108,3 +108,41 @@ async def test_create_admin_account_creates_user_and_platform_membership(
         full_name="CLI Administrator",
     )
     assert user2.id == user.id
+
+
+@pytest.mark.anyio
+@pytest.mark.db
+async def test_create_admin_account_promotes_an_existing_platform_membership(
+    db_session: AsyncSession,
+):
+    """One platform membership per user, so a promotion updates it in place.
+
+    Inserting a second row would hit ``memberships_user_platform_live`` and surface
+    as an uncaught ``IntegrityError`` in the middle of a deployment script.
+    """
+
+    from app.models.identity import Role
+
+    user = await user_repository.create_user(
+        db_session,
+        email="support_to_admin@example.com",
+        password_hash="x",
+        full_name="Support Person",
+    )
+    support_role = Role(key="platform_support", name="Platform Support", shop_id=None)
+    db_session.add(support_role)
+    await db_session.flush()
+    await membership_repository.create_membership(
+        db_session, user_id=user.id, shop_id=None, role_id=support_role.id
+    )
+
+    await create_admin_account(
+        db_session,
+        email="support_to_admin@example.com",
+        password=PASSWORD,
+        full_name="Support Person",
+    )
+
+    resolved = await membership_repository.find_platform_membership(db_session, user.id)
+    assert resolved is not None
+    assert resolved[0].key == "sys_admin"

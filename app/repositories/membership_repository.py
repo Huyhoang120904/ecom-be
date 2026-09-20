@@ -147,6 +147,31 @@ async def soft_delete_platform_membership(
     )
 
 
+async def upsert_platform_membership(
+    session: AsyncSession, *, user_id: uuid.UUID, role_id: uuid.UUID
+) -> None:
+    """Point the user's live platform membership at ``role_id``, inserting it if absent.
+
+    One platform membership per user is a database rule (the partial unique index
+    ``memberships_user_platform_live``), so a promotion updates that row rather than
+    adding a second one: an insert would be an ``IntegrityError`` instead of the
+    promotion the operator asked for.
+    """
+
+    updated = await session.execute(
+        update(Membership)
+        .where(
+            Membership.user_id == user_id,
+            Membership.shop_id.is_(None),
+            Membership.deleted_at.is_(None),
+        )
+        .values(role_id=role_id)
+        .returning(Membership.id)
+    )
+    if updated.first() is None:
+        await create_membership(session, user_id=user_id, shop_id=None, role_id=role_id)
+
+
 async def effective_permissions(
     session: AsyncSession, *, user_id: uuid.UUID, shop_id: uuid.UUID
 ) -> tuple[User, Role, list[str]] | None:

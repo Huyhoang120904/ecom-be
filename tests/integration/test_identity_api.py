@@ -401,6 +401,47 @@ class TestBuyerAndAdminApi:
         assert login.status_code == 403
         assert login.json()["error"] == "forbidden"
 
+    async def test_admin_login_is_refused_for_another_platform_role(
+        self, db_async_client, db_session
+    ):
+        """Only ``sys_admin`` is oversight; another platform role is not an admin."""
+
+        from app.models.identity import Role
+        from app.repositories import membership_repository, user_repository
+
+        await db_async_client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "platform_support@example.com",
+                "password": PASSWORD,
+                "full_name": "Platform Support",
+            },
+        )
+        user = await user_repository.find_user_by_email(
+            db_session, "platform_support@example.com"
+        )
+        assert user is not None
+        support_role = Role(
+            key="platform_support", name="Platform Support", shop_id=None
+        )
+        db_session.add(support_role)
+        await db_session.flush()
+        await membership_repository.create_membership(
+            db_session, user_id=user.id, shop_id=None, role_id=support_role.id
+        )
+
+        login = await db_async_client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": "platform_support@example.com",
+                "password": PASSWORD,
+                "audience": "admin",
+            },
+        )
+
+        assert login.status_code == 403
+        assert login.json()["error"] == "forbidden"
+
     async def test_admin_login_and_me_for_platform_admin(
         self, db_async_client, db_session
     ):
