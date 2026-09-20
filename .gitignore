@@ -28,3 +28,5 @@ dist/
 
 # Media storage. Local image objects live here; the directory is not committed.
 .media/
+postman
+changes

@@ -55,7 +55,7 @@ class TestRegister:
         assert session.user.email == "owner@example.com"
         assert session.active_shop.slug == "owner-shop"
         assert "shop:update" in session.permissions
-        assert len(session.permissions) == 9
+        assert len(session.permissions) == 10
         assert session.refresh_token
 
         memberships = await membership_repository.list_memberships(

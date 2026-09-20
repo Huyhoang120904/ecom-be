@@ -21,9 +21,10 @@ EXPECTED_PERMISSIONS = {
     "shop:update",
     "membership:read",
     "membership:manage",
+    "catalog:manage",
 }
 
-OWNER_ONLY = {"shop:update", "membership:manage"}
+OWNER_ONLY = {"shop:update", "membership:manage", "catalog:manage"}
 
 
 async def _permission_keys_for(db_session, role_key: str) -> set[str]:
@@ -55,7 +56,7 @@ async def test_owner_holds_every_permission(db_session):
     assert await _permission_keys_for(db_session, "owner") == EXPECTED_PERMISSIONS
 
 
-async def test_manager_lacks_the_two_owner_only_permissions(db_session):
+async def test_manager_lacks_every_owner_only_permission(db_session):
     assert await _permission_keys_for(db_session, "manager") == (
         EXPECTED_PERMISSIONS - OWNER_ONLY
     )

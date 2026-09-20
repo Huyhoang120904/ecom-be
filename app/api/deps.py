@@ -126,7 +126,12 @@ async def get_current_principal(
     """
 
     settings: Settings = request.app.state.settings
-    claims = utils.decode_access_token(settings, _bearer_token(request))
+    try:
+        claims = utils.decode_access_token(settings, _bearer_token(request))
+    except utils.InvalidAccessToken as error:
+        # A garbage, expired or foreign token is an authentication failure. Without
+        # this it escaped as an unhandled exception and reached the client as a 500.
+        raise InvalidToken from error
 
     try:
         user_id = UUID(claims["sub"])

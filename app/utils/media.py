@@ -17,6 +17,7 @@ from typing import Final
 
 from PIL import Image, UnidentifiedImageError
 
+from app.constants.catalog import PRODUCT_IMAGE_FIT
 from app.errors.media import ImageTooLarge, UnsupportedImage
 
 # Pillow's own format names, mapped to the media types accepted in a request. The
@@ -69,18 +70,13 @@ def content_digest(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def normalize(
-    image_bytes: bytes,
-    *,
-    declared_content_type: str,
-    size: tuple[int, int],
-    max_bytes: int,
-) -> tuple[bytes, str]:
-    """Validate and normalize an upload.
+def _decode_rgb(
+    image_bytes: bytes, *, declared_content_type: str, max_bytes: int
+) -> Image.Image:
+    """Validate an upload and decode it to RGB.
 
-    Returns the stored bytes and their content digest. The digest is computed over
-    the *normalized* payload, so re-uploading the same photo produces the same key
-    and therefore the same object rather than a duplicate.
+    The size cap is checked before any decode, then the bytes are verified, then the
+    sniffed format is compared with the declared type, then the dimensions are bounded.
     """
 
     if len(image_bytes) > max_bytes:
@@ -107,17 +103,59 @@ def normalize(
     if max(width, height) > MAX_SIDE:
         raise ImageTooLarge
 
-    converted = reopened.convert("RGB")
-    normalized = _center_crop_to(converted, size)
+    return reopened.convert("RGB")
 
+
+def _encode_webp(image: Image.Image) -> tuple[bytes, str]:
     buffer = io.BytesIO()
     # No ``exif=`` and no ``icc_profile=``: the metadata block is dropped. That is
     # not cosmetic. A phone photo carries GPS coordinates, and serving a seller's
     # home location from a public avatar endpoint is a privacy leak.
-    normalized.save(buffer, format="WEBP", quality=WEBP_QUALITY, method=WEBP_METHOD)
+    image.save(buffer, format="WEBP", quality=WEBP_QUALITY, method=WEBP_METHOD)
     payload = buffer.getvalue()
-
     return payload, content_digest(payload)
+
+
+def normalize(
+    image_bytes: bytes,
+    *,
+    declared_content_type: str,
+    size: tuple[int, int],
+    max_bytes: int,
+) -> tuple[bytes, str]:
+    """Validate an upload, crop it to ``size``, and encode it.
+
+    Returns the stored bytes and their content digest. The digest is computed over
+    the *normalized* payload, so re-uploading the same photo produces the same key
+    and therefore the same object rather than a duplicate.
+    """
+
+    converted = _decode_rgb(
+        image_bytes, declared_content_type=declared_content_type, max_bytes=max_bytes
+    )
+    return _encode_webp(_center_crop_to(converted, size))
+
+
+def normalize_fit(
+    image_bytes: bytes,
+    *,
+    declared_content_type: str,
+    box: tuple[int, int],
+    max_bytes: int,
+) -> tuple[bytes, str]:
+    """Validate an upload and shrink it to fit inside ``box``.
+
+    Unlike ``normalize`` this never crops and never enlarges: a product photo has an
+    arbitrary aspect ratio that is part of the picture, and an image already smaller
+    than the box is stored at its own size.
+    """
+
+    converted = _decode_rgb(
+        image_bytes, declared_content_type=declared_content_type, max_bytes=max_bytes
+    )
+    if converted.width > box[0] or converted.height > box[1]:
+        converted.thumbnail(box, Image.Resampling.LANCZOS)
+    return _encode_webp(converted)
 
 
 def normalize_avatar(
@@ -138,5 +176,16 @@ def normalize_background(
         image_bytes,
         declared_content_type=declared_content_type,
         size=BACKGROUND_SIZE,
+        max_bytes=max_bytes,
+    )
+
+
+def normalize_product_image(
+    image_bytes: bytes, *, declared_content_type: str, max_bytes: int
+) -> tuple[bytes, str]:
+    return normalize_fit(
+        image_bytes,
+        declared_content_type=declared_content_type,
+        box=PRODUCT_IMAGE_FIT,
         max_bytes=max_bytes,
     )

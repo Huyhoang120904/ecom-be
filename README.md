@@ -108,7 +108,7 @@ startup and application startup stay independent.
 | Check formatting (CI gate) | `uv run ruff format --check .` |
 | Lint | `uv run ruff check .` |
 | Lint and auto-fix | `uv run ruff check --fix .` |
-| Type-check | `uv run mypy src alembic` |
+| Type-check | `uv run mypy app` |
 | Run the whole suite | `uv run pytest -q` |
 | Run one test file | `uv run pytest -q tests/unit/test_config.py` |
 | Run the database suite | `uv run pytest -q -m db` (needs `docker compose up -d --wait`) |
@@ -199,9 +199,15 @@ called out in the commit message.
 
 ## Endpoints
 
-Health is public so a probe needs no credential. The two media `GET`s are public
-because an avatar and a shop background are shareable-by-intent images. Every
-other route requires a bearer token.
+Health is public so a probe needs no credential. The three media `GET`s are public
+because an avatar, a shop background and a product photo are shareable-by-intent
+images. Every other route requires a bearer token.
+
+The catalog and product routes are specified in `docs/API_CONTRACT_CATALOG.md`;
+the rules behind them are `docs/product/PRODUCT.md`, and the reasons are
+`docs/product/DECISIONS.md`. Catalog writes need `catalog:manage`, which is held only
+by a shop `owner` and is a **temporary** stand-in for a platform-admin check (see the
+plan's *Next phase*).
 
 | Endpoint | Auth | Purpose |
 | --- | --- | --- |
@@ -224,6 +230,41 @@ other route requires a bearer token.
 | `DELETE /api/v1/shops/active` | `shop:update` | Retire the shop, confirmed by its exact name |
 | `GET /api/v1/media/avatar/{user_id}.webp` | public | Serve an avatar |
 | `GET /api/v1/media/shop-background/{shop_id}.webp` | public | Serve a shop background |
+| `GET /api/v1/catalog/brands` | bearer | List brands |
+| `GET /api/v1/catalog/categories` | bearer | The whole category tree, nested, with `is_leaf` |
+| `GET /api/v1/catalog/categories/{category_id}` | bearer | One category |
+| `GET /api/v1/catalog/categories/{category_id}/attributes` | bearer | The attributes a category asks for, with options: what a product form is built from |
+| `GET /api/v1/catalog/attributes/{attribute_id}` | bearer | One attribute with its options |
+| `POST /api/v1/admin/catalog/brands` | `catalog:manage` | Create a brand |
+| `PATCH /api/v1/admin/catalog/brands/{brand_id}` | `catalog:manage` | Rename a brand (the slug is fixed) |
+| `DELETE /api/v1/admin/catalog/brands/{brand_id}` | `catalog:manage` | Delete a brand no product uses |
+| `POST /api/v1/admin/catalog/categories` | `catalog:manage` | Create a category, optionally under a parent |
+| `PATCH /api/v1/admin/catalog/categories/{category_id}` | `catalog:manage` | Rename, reposition or move a category |
+| `DELETE /api/v1/admin/catalog/categories/{category_id}` | `catalog:manage` | Delete a leaf category that holds no products |
+| `POST /api/v1/admin/catalog/attributes` | `catalog:manage` | Create an attribute (`key` and `data_type` are then fixed) |
+| `PATCH /api/v1/admin/catalog/attributes/{attribute_id}` | `catalog:manage` | Rename an attribute |
+| `DELETE /api/v1/admin/catalog/attributes/{attribute_id}` | `catalog:manage` | Delete an unattached, unused attribute |
+| `POST /api/v1/admin/catalog/attributes/{attribute_id}/options` | `catalog:manage` | Add an option to a `SELECT` attribute |
+| `PATCH /api/v1/admin/catalog/attributes/{attribute_id}/options/{option_id}` | `catalog:manage` | Rename or reorder an option |
+| `DELETE /api/v1/admin/catalog/attributes/{attribute_id}/options/{option_id}` | `catalog:manage` | Delete an unused option |
+| `PUT /api/v1/admin/catalog/categories/{category_id}/attributes/{attribute_id}` | `catalog:manage` | Attach an attribute to a category, or replace its flags. Idempotent |
+| `DELETE /api/v1/admin/catalog/categories/{category_id}/attributes/{attribute_id}` | `catalog:manage` | Detach an attribute no product of the category uses |
+| `POST /api/v1/products` | `products:write` | Create a `draft` product in the active shop |
+| `GET /api/v1/products` | `products:read` | List the active shop's products (paged, filter by `status`) |
+| `GET /api/v1/products/{product_id}` | `products:read` | One product with its attributes, variants and images |
+| `PATCH /api/v1/products/{product_id}` | `products:write` | Edit fields and/or replace the attribute values. Cannot change `status` |
+| `DELETE /api/v1/products/{product_id}` | `products:write` | Soft delete a product and its variants |
+| `POST /api/v1/products/{product_id}/publish` | `products:write` | `draft`/`inactive` to `active`, if it meets the requirements |
+| `POST /api/v1/products/{product_id}/unpublish` | `products:write` | `active` to `inactive` |
+| `POST /api/v1/products/{product_id}/variants` | `products:write` | Create a variant (SKU) with its option combination |
+| `GET /api/v1/products/{product_id}/variants` | `products:read` | List a product's variants |
+| `GET /api/v1/products/{product_id}/variants/{variant_id}` | `products:read` | One variant |
+| `PATCH /api/v1/products/{product_id}/variants/{variant_id}` | `products:write` | Change price, stock, status or SKU code. The options cannot change |
+| `DELETE /api/v1/products/{product_id}/variants/{variant_id}` | `products:write` | Soft delete a variant |
+| `POST /api/v1/products/{product_id}/images` | `products:write` | Add an image to the product or a variant (`multipart/form-data`) |
+| `PATCH /api/v1/products/{product_id}/images/{image_id}` | `products:write` | Move an image within its scope (`{ position }`) |
+| `DELETE /api/v1/products/{product_id}/images/{image_id}` | `products:write` | Delete an image |
+| `GET /api/v1/media/product-image/{image_id}.webp` | public | Serve a product or variant image |
 
 Every `2xx` response with a body is wrapped in `BaseResponse`:
 
@@ -264,6 +305,11 @@ as a volume**: a local directory inside a container does not survive a redeploy.
 | `MEDIA_ROOT` | `.media` | Where objects are written |
 | `MEDIA_BASE_URL` | empty | The origin used in returned URLs. Empty means "use the request's own origin" |
 | `MAX_UPLOAD_BYTES` | `2097152` (2 MiB) | The upload cap, enforced before any decode |
+
+A product photo is different from the two above: it is fitted inside 1600 x 1600 with
+its aspect ratio kept (never cropped, never enlarged) and stored as WebP under a key
+derived from its own image id, so deleting one image can never remove another's file.
+At most 9 shared images per product and 5 per variant.
 
 ## Configuration
 
@@ -411,7 +457,7 @@ per-endpoint envelope subclass: one class carries `status_code`, `message`, and
 
 `.github/workflows/ci.yml` runs three jobs on GitHub Actions:
 
-- `quality` — `ruff format --check .`, `ruff check .`, `mypy src alembic`, `uv lock --check`
+- `quality` — `ruff format --check .`, `ruff check .`, `mypy app`, `uv lock --check`
 - `tests` — `uv run pytest -q`, with no external services started (the `db`-marked
   tests are deselected by `addopts`, so this job needs no database)
 - `readiness` — starts PostgreSQL 16 and Redis 7 service containers, applies

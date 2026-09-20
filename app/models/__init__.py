@@ -28,6 +28,13 @@ from app.infrastructure.db.base import Base
 # Importing the class is what registers its table on the shared metadata, and the
 # aggregation guard in tests/unit/test_migration_metadata.py fails when a model
 # module is missing from this block.
+from app.models.catalog import (
+    Attribute,
+    AttributeOption,
+    Brand,
+    Category,
+    CategoryAttribute,
+)
 from app.models.identity import (
     Membership,
     Permission,
@@ -37,10 +44,27 @@ from app.models.identity import (
     Shop,
     User,
 )
+from app.models.product import (
+    Product,
+    ProductAttributeValue,
+    ProductImage,
+    ProductVariant,
+    ProductVariantOption,
+)
 
 __all__: list[str] = [
+    "Attribute",
+    "AttributeOption",
+    "Brand",
+    "Category",
+    "CategoryAttribute",
     "Membership",
     "Permission",
+    "Product",
+    "ProductAttributeValue",
+    "ProductImage",
+    "ProductVariant",
+    "ProductVariantOption",
     "RefreshToken",
     "Role",
     "RolePermission",
