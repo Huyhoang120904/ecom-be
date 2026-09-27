@@ -40,6 +40,7 @@ BINARY_PATHS = frozenset(
     {
         "/api/v1/media/avatar/{user_id}.webp",
         "/api/v1/media/shop-background/{shop_id}.webp",
+        "/api/v1/media/product-image/{image_id}.webp",
     }
 )
 

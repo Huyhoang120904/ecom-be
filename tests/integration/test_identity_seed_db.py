@@ -21,7 +21,9 @@ EXPECTED_PERMISSIONS = {
     "shop:update",
     "membership:read",
     "membership:manage",
+    "catalog:manage",
 }
+
 
 # The platform vocabulary the admin/buyer migration adds. A shop role never holds
 # one of these: they describe oversight of the whole platform, which is what makes
@@ -36,8 +38,7 @@ PLATFORM_PERMISSIONS = {
 
 SHOP_PERMISSIONS = EXPECTED_PERMISSIONS
 EVERY_PERMISSION = SHOP_PERMISSIONS | PLATFORM_PERMISSIONS
-
-OWNER_ONLY = {"shop:update", "membership:manage"}
+OWNER_ONLY = {"shop:update", "membership:manage", "catalog:manage"}
 
 
 async def _permission_keys_for(db_session, role_key: str) -> set[str]:
@@ -75,7 +76,7 @@ async def test_sys_admin_holds_every_permission(db_session):
     assert await _permission_keys_for(db_session, "sys_admin") == EVERY_PERMISSION
 
 
-async def test_manager_lacks_the_two_owner_only_permissions(db_session):
+async def test_manager_lacks_every_owner_only_permission(db_session):
     assert await _permission_keys_for(db_session, "manager") == (
         SHOP_PERMISSIONS - OWNER_ONLY
     )

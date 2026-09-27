@@ -14,6 +14,7 @@ from __future__ import annotations
 import uuid
 
 from app.config.settings import Settings, get_settings
+from app.constants.catalog import PRODUCT_IMAGE_PREFIX
 from app.infrastructure.storage.local import StorageBackend
 from app.utils import media as utils
 
@@ -47,6 +48,17 @@ class MediaService:
     def background_key(shop_id: uuid.UUID, digest: str) -> str:
         return f"{BACKGROUND_PREFIX}/{shop_id}/{digest}.webp"
 
+    @staticmethod
+    def product_image_key(image_id: uuid.UUID, digest: str) -> str:
+        """``product-images/<image>/<digest>.webp``.
+
+        Keyed by the *image row's* id rather than by product plus digest, so two rows
+        that happen to hold identical bytes each own their object: deleting one can
+        never remove the other's file.
+        """
+
+        return f"{PRODUCT_IMAGE_PREFIX}/{image_id}/{digest}.webp"
+
     # -- use cases ---------------------------------------------------------------
 
     async def store_avatar(
@@ -74,6 +86,20 @@ class MediaService:
             max_bytes=self._settings.max_upload_bytes,
         )
         key = self.background_key(shop_id, digest)
+        await self._storage.put(key, payload, "image/webp")
+        return key
+
+    async def store_product_image(
+        self, *, image_id: uuid.UUID, image_bytes: bytes, declared_content_type: str
+    ) -> str:
+        """Fit and store a product photo, returning its storage key."""
+
+        payload, digest = utils.normalize_product_image(
+            image_bytes,
+            declared_content_type=declared_content_type,
+            max_bytes=self._settings.max_upload_bytes,
+        )
+        key = self.product_image_key(image_id, digest)
         await self._storage.put(key, payload, "image/webp")
         return key
 

@@ -150,7 +150,7 @@ class TestMembershipsAndPermissions:
         _user, role, keys = resolved
         assert role.key == "owner"
         assert "shop:update" in keys
-        assert len(keys) == 9
+        assert len(keys) == 10
 
     async def test_a_viewer_resolves_fewer_keys(self, db_session):
         user = await _make_user(db_session)

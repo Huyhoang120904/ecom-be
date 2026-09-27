@@ -171,8 +171,10 @@ common case.
   need live PostgreSQL or Redis belong in the CI `readiness` job.
 - Alembic takes its URL from the validated settings (`DATABASE_URL`); no
   connection string belongs in `alembic.ini`.
-- The scaffold's migration history is empty by design because no business entity
-  exists yet. Do not add a placeholder table to make it look populated.
+- The committed Alembic history contains the identity schema and seeds, the
+  admin/buyer identity revision, the catalog and product revisions, and a merge
+  revision that converges their branches. Add real migrations for persisted
+  features; do not add a placeholder table to make the history look populated.
 
 ## Contract changes
 
