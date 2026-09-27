@@ -26,6 +26,11 @@ class AppError(Exception):
     code: str = "internal_server_error"
     status_code: int = 500
     message: str = "Internal server error"
+    # Optional structured facts a client can act on (for example which attributes are
+    # missing). Populated by an error's own constructor from *identifiers and names
+    # the service already resolved*, never from raw request text, so it carries no
+    # reflection risk. ``None`` keeps the body at exactly ``{"error", "message"}``.
+    details: dict[str, object] | None = None
 
 
 _HTTP_ERROR_MESSAGES: dict[int, tuple[str, str]] = {
@@ -50,10 +55,10 @@ def app_error_handler(request: Request, exc: Exception) -> JSONResponse:
     del request
     if not isinstance(exc, AppError):
         raise exc
-    return JSONResponse(
-        status_code=exc.status_code,
-        content={"error": exc.code, "message": exc.message},
-    )
+    content: dict[str, object] = {"error": exc.code, "message": exc.message}
+    if exc.details is not None:
+        content["details"] = exc.details
+    return JSONResponse(status_code=exc.status_code, content=content)
 
 
 def http_exception_handler(

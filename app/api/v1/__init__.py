@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.v1 import health, identity, media
+from app.api.v1 import catalog, health, identity, media, products
 
 api_router = APIRouter()
 # Health stays public so a probe needs no credential. Every other route introduced
@@ -20,5 +20,7 @@ api_router.include_router(health.router)
 api_router.include_router(identity.router)
 api_router.include_router(identity.shops_router)
 api_router.include_router(media.router)
+api_router.include_router(catalog.router)
+api_router.include_router(products.router)
 
 router = api_router

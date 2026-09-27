@@ -21,9 +21,11 @@ from __future__ import annotations
 from fastapi import Request
 
 from app.models.identity import Shop, User
+from app.models.product import ProductImage
 
 AVATAR_PATH = "/api/v1/media/avatar"
 BACKGROUND_PATH = "/api/v1/media/shop-background"
+PRODUCT_IMAGE_PATH = "/api/v1/media/product-image"
 
 _DIGEST_LENGTH = 64
 
@@ -67,4 +69,13 @@ def background_url(shop: Shop, request: Request) -> str | None:
     return (
         f"{_origin(request)}{BACKGROUND_PATH}/{shop.id}.webp"
         f"?v={_version(shop.background_key)}"
+    )
+
+
+def product_image_url(image: ProductImage, request: Request) -> str:
+    """The URL for a product or variant image."""
+
+    return (
+        f"{_origin(request)}{PRODUCT_IMAGE_PATH}/{image.id}.webp"
+        f"?v={_version(image.key)}"
     )

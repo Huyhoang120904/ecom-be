@@ -18,7 +18,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_application_db_session
 from app.errors.media import ImageNotFound
 from app.infrastructure.storage.local import LocalStorageBackend, StorageBackend
-from app.repositories import shop_repository, user_repository
+from app.repositories import (
+    product_image_repository,
+    shop_repository,
+    user_repository,
+)
 from app.services.media_service import MediaService
 
 router = APIRouter(prefix="/api/v1/media", tags=["media"])
@@ -99,6 +103,31 @@ async def serve_shop_background(
         raise ImageNotFound
 
     result = await media.read(shop.background_key)
+    if result is None:
+        raise ImageNotFound
+    payload, digest = result
+    return _serve(payload, f'"{digest}"', request)
+
+
+@router.get("/product-image/{image_id}.webp")
+async def serve_product_image(
+    image_id: uuid.UUID,
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_application_db_session)],
+    media: Annotated[MediaService, Depends(get_media_service)],
+) -> Response:
+    """Serve a product or variant image.
+
+    Public, like the other media routes: a product photo is meant to be seen, and its
+    URL is a UUID handed out with the product. The key is read from the database, so a
+    deleted image is a 404 rather than a stale hit.
+    """
+
+    image = await product_image_repository.get_image(session, image_id)
+    if image is None:
+        raise ImageNotFound
+
+    result = await media.read(image.key)
     if result is None:
         raise ImageNotFound
     payload, digest = result
