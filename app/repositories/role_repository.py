@@ -8,6 +8,7 @@ request, so this module has no writes.
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants.identity.rbac import SYS_ADMIN_ROLE_KEY
 from app.models.identity import Permission, Role
 
 
@@ -26,6 +27,25 @@ async def get_owner_role(session: AsyncSession) -> Role:
     if role is None:
         raise RuntimeError(
             "the owner system role is missing; run `alembic upgrade head`"
+        )
+    return role
+
+
+async def get_sys_admin_role(session: AsyncSession) -> Role:
+    """The seeded ``sys_admin`` system role.
+
+    Raises rather than returning ``None``: its absence means the seed migration has
+    not run, which is a deployment state, not a request-level error.
+    """
+
+    role = (
+        await session.scalars(
+            select(Role).where(Role.key == SYS_ADMIN_ROLE_KEY, Role.shop_id.is_(None))
+        )
+    ).first()
+    if role is None:
+        raise RuntimeError(
+            "the sys_admin system role is missing; run `alembic upgrade head`"
         )
     return role
 

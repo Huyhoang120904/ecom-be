@@ -15,7 +15,7 @@
   ```bash
   uv run ruff format --check .
   uv run ruff check .
-  uv run mypy app
+  uv run mypy app alembic
   uv run pytest -q
   uv lock --check
   ```
@@ -28,6 +28,7 @@ needs, and a change's layer is decided by what the change does.
 ```
 app/
 ├── main.py                     # app factory, lifespan, middleware wiring
+├── cli.py                      # operator commands (`create-admin`), argparse only
 ├── config/settings.py          # the validated settings object
 ├── core/                       # cross-cutting: errors.py, logging.py
 ├── infrastructure/             # external systems
@@ -95,6 +96,18 @@ envelope's own fields.
 
 Errors are not enveloped: they keep `{"error", "message"}` from `core/errors.py`.
 
+### Audience perimeters
+
+An access token declares exactly one audience — `storefront`, `cms`, or `admin` —
+and `get_current_principal` refuses to build a caller whose token was issued for a
+different one. Guards compose on top of it: `require_audience(...)`,
+`require_seller`, `require_platform_admin`, and the pre-existing
+`require_permissions`/`require_roles`. A platform administrator
+(`is_platform_admin=True`) satisfies every permission check, so a new oversight
+route does not enumerate grants. CMS clients must ask for `"audience": "cms"` at
+login; the default is `storefront`, because a public storefront sign-in is the
+common case.
+
 ### Layer rules
 
 - **Routes do not perform persistence.** A router in `api/v1/` defines the HTTP
@@ -158,8 +171,10 @@ Errors are not enveloped: they keep `{"error", "message"}` from `core/errors.py`
   need live PostgreSQL or Redis belong in the CI `readiness` job.
 - Alembic takes its URL from the validated settings (`DATABASE_URL`); no
   connection string belongs in `alembic.ini`.
-- The scaffold's migration history is empty by design because no business entity
-  exists yet. Do not add a placeholder table to make it look populated.
+- The committed Alembic history contains the identity schema and seeds, the
+  admin/buyer identity revision, the catalog and product revisions, and a merge
+  revision that converges their branches. Add real migrations for persisted
+  features; do not add a placeholder table to make the history look populated.
 
 ## Contract changes
 

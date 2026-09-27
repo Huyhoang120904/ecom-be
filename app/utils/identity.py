@@ -221,11 +221,15 @@ def new_refresh_token() -> tuple[str, str]:
     return token, hash_refresh_token(token)
 
 
+VALID_AUDIENCES = frozenset({"storefront", "cms", "admin"})
+
+
 def issue_access_token(
     settings: Settings,
     *,
     user_id: str,
-    active_shop_id: str,
+    audience: str = "cms",
+    active_shop_id: str | None = None,
     now: datetime | None = None,
     issuer: str = ISSUER,
     token_type: Literal["access", "refresh"] = "access",
@@ -240,29 +244,47 @@ def issue_access_token(
     tested directly instead of by forging a token by hand.
     """
 
+    if audience not in VALID_AUDIENCES:
+        raise ValueError(f"invalid audience: {audience}")
+    if audience == "cms" and active_shop_id is None:
+        raise ValueError("active_shop_id is required for cms audience")
+    if audience != "cms" and active_shop_id is not None:
+        # The claim is meaningless for the other two perimeters, and a token carrying
+        # one invites a reader to trust a shop binding that was never verified.
+        raise ValueError("active_shop_id is only valid for cms audience")
+
     issued = now or datetime.now(UTC)
     payload: dict[str, Any] = {
         "sub": str(user_id),
-        "sid": str(active_shop_id),
+        "aud": audience,
         "type": token_type,
         "iss": issuer,
         "jti": uuid.uuid4().hex,
         "iat": issued,
         "exp": issued + timedelta(seconds=settings.access_token_ttl_seconds),
     }
+    if active_shop_id is not None:
+        payload["sid"] = str(active_shop_id)
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
 
-def decode_access_token(settings: Settings, token: str) -> dict[str, Any]:
+def decode_access_token(
+    settings: Settings, token: str, *, expected_audience: str | None = None
+) -> dict[str, Any]:
     """Verify a bearer token and return its claims.
 
-    Four things are asserted, and each one closes a real hole:
+    Five things are asserted, and each one closes a real hole:
 
     * the signature, so a token was minted by this service;
     * ``exp`` with a small leeway, so an expired token is not honoured;
     * ``iss``, so a token minted by another service is refused;
-    * ``type == "access"``, so a refresh value can never be presented as a bearer.
+    * ``type == "access"``, so a refresh value can never be presented as a bearer;
+    * ``aud``, so a token minted for one surface cannot cross into another.
     """
+
+    allowed_audience: str | list[str] = (
+        expected_audience if expected_audience is not None else list(VALID_AUDIENCES)
+    )
 
     try:
         claims = jwt.decode(
@@ -270,14 +292,33 @@ def decode_access_token(settings: Settings, token: str) -> dict[str, Any]:
             settings.jwt_secret,
             algorithms=["HS256"],
             issuer=ISSUER,
+            audience=allowed_audience,
             leeway=_TOKEN_LEEWAY_SECONDS,
-            options={"require": ["exp", "iat", "sub", "sid", "type", "iss", "jti"]},
+            options={"require": ["exp", "iat", "sub", "aud", "type", "iss", "jti"]},
         )
+    except jwt.InvalidAudienceError as error:
+        if expected_audience is not None:
+            raise InvalidAccessToken(f"audience mismatch: {error}") from error
+        raise InvalidAccessToken(str(error)) from error
     except jwt.PyJWTError as error:
         raise InvalidAccessToken(str(error)) from error
 
     if claims.get("type") != "access":
         raise InvalidAccessToken("wrong token type")
-    if not isinstance(claims.get("sub"), str) or not isinstance(claims.get("sid"), str):
-        raise InvalidAccessToken("missing subject claims")
+
+    aud = claims.get("aud")
+    # ``isinstance`` first: PyJWT accepts a JSON array for ``aud``, and ``in`` on a
+    # frozenset with an unhashable value raises ``TypeError`` — a 500 for a malformed
+    # token rather than the 401 every other bad claim produces.
+    if not isinstance(aud, str) or aud not in VALID_AUDIENCES:
+        raise InvalidAccessToken("invalid audience")
+
+    if not isinstance(claims.get("sub"), str):
+        raise InvalidAccessToken("missing subject claim")
+
+    if aud == "cms":
+        sid = claims.get("sid")
+        if not isinstance(sid, str) or not sid.strip():
+            raise InvalidAccessToken("missing active shop claim")
+
     return claims

@@ -28,7 +28,7 @@ async def owner_headers(client: AsyncClient) -> dict[str, str]:
     await client.post("/api/v1/auth/register", json=SHOP_OWNER)
     login = await client.post(
         "/api/v1/auth/login",
-        json={"email": SHOP_OWNER["email"], "password": PASSWORD},
+        json={"email": SHOP_OWNER["email"], "password": PASSWORD, "audience": "cms"},
     )
     return {"authorization": f"Bearer {login.json()['data']['access_token']}"}
 

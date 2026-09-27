@@ -44,7 +44,8 @@ async def signed_up(client: AsyncClient, email: str) -> dict[str, str]:
         },
     )
     login = await client.post(
-        "/api/v1/auth/login", json={"email": email, "password": PASSWORD}
+        "/api/v1/auth/login",
+        json={"email": email, "password": PASSWORD, "audience": "cms"},
     )
     return {"authorization": f"Bearer {login.json()['data']['access_token']}"}
 

@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from sqlalchemy import Row, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants.identity.rbac import SYS_ADMIN_ROLE_KEY
 from app.models.identity import (
     Membership,
     Permission,
@@ -31,7 +32,7 @@ async def create_membership(
     session: AsyncSession,
     *,
     user_id: uuid.UUID,
-    shop_id: uuid.UUID,
+    shop_id: uuid.UUID | None,
     role_id: uuid.UUID,
 ) -> Membership:
     membership = Membership(user_id=user_id, shop_id=shop_id, role_id=role_id)
@@ -125,6 +126,70 @@ async def soft_delete_memberships_for_shop(
     )
 
 
+async def soft_delete_platform_membership(
+    session: AsyncSession, user_id: uuid.UUID
+) -> None:
+    """Retire a user's platform role, keeping the row.
+
+    Demotion is an operator action rather than a request path, but the refresh flow
+    has to survive it: a session whose platform membership is gone must lose admin
+    authority, and this is how that state is created.
+    """
+
+    await session.execute(
+        update(Membership)
+        .where(
+            Membership.user_id == user_id,
+            Membership.shop_id.is_(None),
+            Membership.deleted_at.is_(None),
+        )
+        .values(deleted_at=datetime.now(UTC))
+    )
+
+
+async def get_live_platform_membership(
+    session: AsyncSession, user_id: uuid.UUID
+) -> Membership | None:
+    """The user's live platform membership row, whatever role it holds.
+
+    ``find_platform_membership`` answers "is this an administrator"; this answers
+    "is there a platform row at all", which is what a promotion has to know before it
+    inserts a second one, and what a test has to read to prove it did not.
+    """
+
+    statement = select(Membership).where(
+        Membership.user_id == user_id,
+        Membership.shop_id.is_(None),
+        Membership.deleted_at.is_(None),
+    )
+    return (await session.execute(statement)).scalars().first()
+
+
+async def upsert_platform_membership(
+    session: AsyncSession, *, user_id: uuid.UUID, role_id: uuid.UUID
+) -> None:
+    """Point the user's live platform membership at ``role_id``, inserting it if absent.
+
+    One platform membership per user is a database rule (the partial unique index
+    ``memberships_user_platform_live``), so a promotion updates that row rather than
+    adding a second one: an insert would be an ``IntegrityError`` instead of the
+    promotion the operator asked for.
+    """
+
+    updated = await session.execute(
+        update(Membership)
+        .where(
+            Membership.user_id == user_id,
+            Membership.shop_id.is_(None),
+            Membership.deleted_at.is_(None),
+        )
+        .values(role_id=role_id)
+        .returning(Membership.id)
+    )
+    if updated.first() is None:
+        await create_membership(session, user_id=user_id, shop_id=None, role_id=role_id)
+
+
 async def effective_permissions(
     session: AsyncSession, *, user_id: uuid.UUID, shop_id: uuid.UUID
 ) -> tuple[User, Role, list[str]] | None:
@@ -164,3 +229,38 @@ async def effective_permissions(
     user, role = rows[0][0], rows[0][1]
     keys = sorted({row[2] for row in rows if row[2] is not None})
     return user, role, keys
+
+
+async def find_platform_membership(
+    session: AsyncSession, user_id: uuid.UUID
+) -> tuple[Role, list[str]] | None:
+    """The user's ``sys_admin`` platform role and its permissions, or None.
+
+    Filtered on the role key, not merely on ``shop_id IS NULL``: a platform
+    membership that grants some other role is not platform oversight, and the caller
+    (admin login, refresh, principal resolution) treats a found row as authority.
+    """
+
+    statement = (
+        select(Role, Permission.key)
+        # Membership is named as the starting point because Role and Permission are
+        # both in the select list, and only an explicit left side tells the compiler
+        # which table the platform-role join hangs off.
+        .select_from(Membership)
+        .join(Role, Role.id == Membership.role_id)
+        .outerjoin(RolePermission, RolePermission.role_id == Role.id)
+        .outerjoin(Permission, Permission.id == RolePermission.permission_id)
+        .where(
+            Membership.user_id == user_id,
+            Membership.shop_id.is_(None),
+            Membership.deleted_at.is_(None),
+            Role.deleted_at.is_(None),
+            Role.key == SYS_ADMIN_ROLE_KEY,
+        )
+    )
+    rows = (await session.execute(statement)).all()
+    if not rows:
+        return None
+    role = rows[0][0]
+    permissions = sorted({row[1] for row in rows if row[1] is not None})
+    return role, permissions

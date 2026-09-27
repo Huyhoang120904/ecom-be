@@ -8,8 +8,11 @@ status and error code of each failure.
 
 from __future__ import annotations
 
+import io
+
 import pytest
 from httpx import AsyncClient
+from PIL import Image
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
 
@@ -33,6 +36,28 @@ def _cookie_attributes(set_cookie: str) -> dict[str, str]:
 
 async def _register(client: AsyncClient, payload: dict | None = None):
     return await client.post("/api/v1/auth/register", json=payload or REGISTER)
+
+
+def _png() -> bytes:
+    """A valid image for the avatar route, which refuses anything else."""
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (64, 64), (10, 20, 30)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+async def _buyer_token(client: AsyncClient, email: str) -> str:
+    """Register a buyer (no shop) and return their storefront access token."""
+
+    await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": PASSWORD, "full_name": "Buyer Person"},
+    )
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": PASSWORD, "audience": "storefront"},
+    )
+    return login.json()["data"]["access_token"]
 
 
 class TestRegister:
@@ -71,6 +96,7 @@ class TestRegister:
             "access_token",
             "token_type",
             "expires_in",
+            "audience",
             "user",
             "active_shop",
             "memberships",
@@ -106,7 +132,7 @@ class TestLoginAndMe:
         await _register(db_async_client)
         login = await db_async_client.post(
             "/api/v1/auth/login",
-            json={"email": REGISTER["email"], "password": PASSWORD},
+            json={"email": REGISTER["email"], "password": PASSWORD, "audience": "cms"},
         )
         assert login.status_code == 200
         token = login.json()["data"]["access_token"]
@@ -145,7 +171,11 @@ class TestLoginAndMe:
 
         wrong = await db_async_client.post(
             "/api/v1/auth/login",
-            json={"email": REGISTER["email"], "password": "wrong-password-entirely"},
+            json={
+                "email": REGISTER["email"],
+                "password": "wrong-password-entirely",
+                "audience": "cms",
+            },
         )
         unknown = await db_async_client.post(
             "/api/v1/auth/login",
@@ -203,7 +233,7 @@ class TestProfileUpdate:
         await _register(client)
         login = await client.post(
             "/api/v1/auth/login",
-            json={"email": REGISTER["email"], "password": PASSWORD},
+            json={"email": REGISTER["email"], "password": PASSWORD, "audience": "cms"},
         )
         return {"authorization": f"Bearer {login.json()['data']['access_token']}"}
 
@@ -269,7 +299,7 @@ class TestDeactivate:
         await _register(db_async_client)
         login = await db_async_client.post(
             "/api/v1/auth/login",
-            json={"email": REGISTER["email"], "password": PASSWORD},
+            json={"email": REGISTER["email"], "password": PASSWORD, "audience": "cms"},
         )
         headers = {"authorization": f"Bearer {login.json()['data']['access_token']}"}
 
@@ -288,7 +318,7 @@ class TestDeactivate:
 
         relogin = await db_async_client.post(
             "/api/v1/auth/login",
-            json={"email": REGISTER["email"], "password": PASSWORD},
+            json={"email": REGISTER["email"], "password": PASSWORD, "audience": "cms"},
         )
         assert relogin.status_code == 403
         assert relogin.json()["error"] == "account_deactivated"
@@ -297,7 +327,7 @@ class TestDeactivate:
         await _register(db_async_client)
         login = await db_async_client.post(
             "/api/v1/auth/login",
-            json={"email": REGISTER["email"], "password": PASSWORD},
+            json={"email": REGISTER["email"], "password": PASSWORD, "audience": "cms"},
         )
         await db_async_client.post(
             "/api/v1/auth/deactivate",
@@ -309,3 +339,219 @@ class TestDeactivate:
 
         assert response.status_code == 409
         assert response.json()["error"] == "email_taken"
+
+
+class TestBuyerAndAdminApi:
+    async def test_buyer_registration_login_and_me(self, db_async_client):
+        reg = await db_async_client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "buyer1@example.com",
+                "password": PASSWORD,
+                "full_name": "Buyer One",
+            },
+        )
+        assert reg.status_code == 201
+        reg_data = reg.json()["data"]
+        assert reg_data["audience"] == "storefront"
+        assert reg_data["active_shop"] is None
+
+        # Login with audience="storefront"
+        login = await db_async_client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": "buyer1@example.com",
+                "password": PASSWORD,
+                "audience": "storefront",
+            },
+        )
+        assert login.status_code == 200
+        login_data = login.json()["data"]
+        assert login_data["audience"] == "storefront"
+        assert login_data["active_shop"] is None
+        token = login_data["access_token"]
+
+        # Call /auth/me
+        me = await db_async_client.get(
+            "/api/v1/auth/me", headers={"authorization": f"Bearer {token}"}
+        )
+        assert me.status_code == 200
+        me_data = me.json()["data"]
+        assert me_data["audience"] == "storefront"
+        assert me_data["active_shop"] is None
+        assert me_data["is_platform_admin"] is False
+
+    async def test_admin_login_forbidden_for_regular_user(self, db_async_client):
+        await db_async_client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "regular@example.com",
+                "password": PASSWORD,
+                "full_name": "Regular User",
+            },
+        )
+        login = await db_async_client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": "regular@example.com",
+                "password": PASSWORD,
+                "audience": "admin",
+            },
+        )
+        assert login.status_code == 403
+        assert login.json()["error"] == "forbidden"
+
+    async def test_admin_login_is_refused_for_another_platform_role(
+        self, db_async_client, db_session
+    ):
+        """Only ``sys_admin`` is oversight; another platform role is not an admin."""
+
+        from app.models.identity import Role
+        from app.repositories import membership_repository, user_repository
+
+        await db_async_client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": "platform_support@example.com",
+                "password": PASSWORD,
+                "full_name": "Platform Support",
+            },
+        )
+        user = await user_repository.find_user_by_email(
+            db_session, "platform_support@example.com"
+        )
+        assert user is not None
+        support_role = Role(
+            key="platform_support", name="Platform Support", shop_id=None
+        )
+        db_session.add(support_role)
+        await db_session.flush()
+        await membership_repository.create_membership(
+            db_session, user_id=user.id, shop_id=None, role_id=support_role.id
+        )
+
+        login = await db_async_client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": "platform_support@example.com",
+                "password": PASSWORD,
+                "audience": "admin",
+            },
+        )
+
+        assert login.status_code == 403
+        assert login.json()["error"] == "forbidden"
+
+    async def test_admin_login_and_me_for_platform_admin(
+        self, db_async_client, db_session
+    ):
+        from app.cli import create_admin_account
+
+        await create_admin_account(
+            db_session,
+            email="platform_admin@example.com",
+            password=PASSWORD,
+            full_name="Platform Admin",
+        )
+
+        login = await db_async_client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": "platform_admin@example.com",
+                "password": PASSWORD,
+                "audience": "admin",
+            },
+        )
+        assert login.status_code == 200
+        login_data = login.json()["data"]
+        assert login_data["audience"] == "admin"
+        assert login_data["active_shop"] is None
+        token = login_data["access_token"]
+
+        me = await db_async_client.get(
+            "/api/v1/auth/me", headers={"authorization": f"Bearer {token}"}
+        )
+        assert me.status_code == 200
+        me_data = me.json()["data"]
+        assert me_data["audience"] == "admin"
+        assert me_data["is_platform_admin"] is True
+        assert "platform:metrics:read" in me_data["permissions"]
+
+    async def test_a_storefront_token_is_refused_on_a_seller_route(
+        self, db_async_client
+    ):
+        """Audience isolation: the buyer owns no shop, so no shop route is theirs."""
+
+        token = await _buyer_token(db_async_client, "buyer_seller_route@example.com")
+
+        response = await db_async_client.patch(
+            "/api/v1/shops/active",
+            json={"description": "Not mine to change."},
+            headers={"authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"] == "forbidden"
+
+    async def test_an_admin_token_is_refused_on_a_seller_route(
+        self, db_async_client, db_session
+    ):
+        """Every permission, no shop: refused, not raising on a missing sid."""
+
+        from app.cli import create_admin_account
+
+        await create_admin_account(
+            db_session,
+            email="platform_admin_routes@example.com",
+            password=PASSWORD,
+            full_name="Platform Admin Routes",
+        )
+        login = await db_async_client.post(
+            "/api/v1/auth/login",
+            json={
+                "email": "platform_admin_routes@example.com",
+                "password": PASSWORD,
+                "audience": "admin",
+            },
+        )
+        token = login.json()["data"]["access_token"]
+
+        response = await db_async_client.patch(
+            "/api/v1/shops/active",
+            json={"description": "Not the platform's to edit from here."},
+            headers={"authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"] == "forbidden"
+
+    async def test_a_storefront_token_cannot_switch_shop(self, db_async_client):
+        """Switching mints a CMS session, so the caller must already be in the CMS."""
+
+        token = await _buyer_token(db_async_client, "buyer_switch@example.com")
+
+        response = await db_async_client.post(
+            "/api/v1/auth/switch-shop",
+            json={"shop_id": "11111111-1111-4111-8111-111111111111"},
+            headers={"authorization": f"Bearer {token}"},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"] == "forbidden"
+
+    async def test_a_buyer_can_upload_their_own_avatar(self, db_async_client):
+        """An avatar belongs to the account, so a shop-less caller can still set one."""
+
+        token = await _buyer_token(db_async_client, "buyer_avatar@example.com")
+
+        upload = await db_async_client.post(
+            "/api/v1/auth/me/avatar",
+            files={"file": ("me.png", _png(), "image/png")},
+            headers={"authorization": f"Bearer {token}"},
+        )
+
+        assert upload.status_code == 200
+        data = upload.json()["data"]
+        assert data["audience"] == "storefront"
+        assert data["active_shop"] is None
+        assert data["user"]["avatar_url"] is not None

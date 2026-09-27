@@ -28,6 +28,7 @@ from app.errors.identity import (
     AccountDeactivated,
     AccountInactive,
     EmailTaken,
+    Forbidden,
     InvalidCredentials,
     InvalidToken,
     NotAMember,
@@ -64,12 +65,12 @@ class AuthService:
         email: str,
         password: str,
         full_name: str,
-        shop_name: str,
+        shop_name: str | None = None,
     ) -> Session:
-        """Create the account, its first shop, and the owner membership, then sign in.
+        """Create the account, optionally its first shop, and sign in.
 
-        One commit at the end. A failure anywhere before it leaves nothing behind,
-        so a seller cannot end up with an account that has no shop.
+        One commit at the end. If shop_name is provided, creates the shop and
+        the owner membership. If shop_name is None, creates a buyer account.
         """
 
         if await user_repository.find_user_by_email(self._session, email) is not None:
@@ -82,14 +83,26 @@ class AuthService:
                 password_hash=hash_password(password),
                 full_name=full_name,
             )
-            shop = await shop_repository.create_shop(self._session, name=shop_name)
-            owner_role = await role_repository.get_owner_role(self._session)
-            await membership_repository.create_membership(
-                self._session,
-                user_id=user.id,
-                shop_id=shop.id,
-                role_id=owner_role.id,
-            )
+            if shop_name is not None:
+                shop = await shop_repository.create_shop(self._session, name=shop_name)
+                owner_role = await role_repository.get_owner_role(self._session)
+                await membership_repository.create_membership(
+                    self._session,
+                    user_id=user.id,
+                    shop_id=shop.id,
+                    role_id=owner_role.id,
+                )
+                result = await issue_session(
+                    self._session, self._settings, user, audience="cms", shop_id=shop.id
+                )
+            else:
+                result = await issue_session(
+                    self._session,
+                    self._settings,
+                    user,
+                    audience="storefront",
+                    shop_id=None,
+                )
         except IntegrityError as error:
             # The unique index is the arbiter of two simultaneous registrations of the
             # same address, so this is a 409 rather than a 500.
@@ -98,11 +111,12 @@ class AuthService:
                 raise EmailTaken from error
             raise
 
-        result = await issue_session(self._session, self._settings, user, shop.id)
         await self._session.commit()
         return result
 
-    async def login(self, *, email: str, password: str) -> Session:
+    async def login(
+        self, *, email: str, password: str, audience: str = "storefront"
+    ) -> Session:
         """Verify credentials and start a session."""
 
         user = await user_repository.find_user_by_email(self._session, email)
@@ -120,18 +134,34 @@ class AuthService:
         if user.deactivated_at is not None:
             raise AccountDeactivated
 
-        memberships = await membership_repository.list_memberships(
-            self._session, user.id
-        )
-        if not memberships:
-            # An account with no live shop cannot do anything, and that is a state
-            # worth distinguishing from a bad password.
-            raise AccountInactive
+        if audience == "cms":
+            memberships = await membership_repository.list_memberships(
+                self._session, user.id
+            )
+            # Only a live, unsuspended shop can host a session. Picking the oldest
+            # membership regardless would mint a token the very next request refuses,
+            # and the refresh path already re-checks this, so login has to agree.
+            active_shops = [shop for shop, _role in memberships if shop.is_active]
+            if not active_shops:
+                # An account with no usable shop cannot do anything in the CMS.
+                raise AccountInactive
+            shop_id = active_shops[0].id
+        elif audience == "admin":
+            platform_membership = await membership_repository.find_platform_membership(
+                self._session, user.id
+            )
+            if platform_membership is None:
+                raise Forbidden
+            shop_id = None
+        elif audience == "storefront":
+            shop_id = None
+        else:
+            raise ValueError(f"unknown audience: {audience}")
 
         await refresh_token_repository.delete_expired_refresh_tokens(self._session)
         await user_repository.set_last_login(self._session, user.id)
         result = await issue_session(
-            self._session, self._settings, user, memberships[0][0].id
+            self._session, self._settings, user, audience=audience, shop_id=shop_id
         )
         await self._session.commit()
         return result
@@ -188,27 +218,52 @@ class AuthService:
             await self._session.commit()
             raise AccountInactive
 
-        if stored.active_shop_id is None:
-            raise ShopNotAccessible
-        membership = await membership_repository.find_membership(
-            self._session, user_id=user.id, shop_id=stored.active_shop_id
-        )
-        if membership is None or not membership[0].is_active:
-            # The bound shop is gone or suspended, so the session cannot continue
-            # against it.
-            await refresh_token_repository.revoke_family(
-                self._session, stored.family_id
-            )
-            await self._session.commit()
-            raise ShopNotAccessible
-
         family_id = stored.family_id
         await refresh_token_repository.delete_expired_refresh_tokens(self._session)
+
+        token_aud = stored.audience
+        if token_aud not in utils.VALID_AUDIENCES:
+            # A stored value the software no longer recognises is a corrupt row, not a
+            # storefront session; treating it as one would silently widen a perimeter.
+            raise InvalidToken
+        target_shop_id: uuid.UUID | None = None
+        if token_aud == "cms":
+            if stored.active_shop_id is None:
+                raise ShopNotAccessible
+            membership = await membership_repository.find_membership(
+                self._session, user_id=user.id, shop_id=stored.active_shop_id
+            )
+            if membership is None or not membership[0].is_active:
+                # The bound shop is gone or suspended, so the session cannot continue
+                # against it.
+                await refresh_token_repository.revoke_family(
+                    self._session, stored.family_id
+                )
+                await self._session.commit()
+                raise ShopNotAccessible
+            target_shop_id = stored.active_shop_id
+        elif token_aud == "admin":
+            platform_membership = await membership_repository.find_platform_membership(
+                self._session, user.id
+            )
+            if platform_membership is None:
+                await refresh_token_repository.revoke_family(
+                    self._session, stored.family_id
+                )
+                await self._session.commit()
+                raise Forbidden
+            target_shop_id = None
+        elif token_aud == "storefront":
+            target_shop_id = None
+        else:  # unreachable: the audience is validated above, kept total on purpose
+            raise InvalidToken
+
         result = await issue_session(
             self._session,
             self._settings,
             user,
-            stored.active_shop_id,
+            audience=token_aud,
+            shop_id=target_shop_id,
             family_id=family_id,
         )
         # Mark the presented token replaced only after the new row exists, so
@@ -272,7 +327,12 @@ class AuthService:
                 family_id = stored.family_id
 
         result = await issue_session(
-            self._session, self._settings, user, shop_id, family_id=family_id
+            self._session,
+            self._settings,
+            user,
+            audience="cms",
+            shop_id=shop_id,
+            family_id=family_id,
         )
         if refresh_token and family_id is not None:
             previous = await refresh_token_repository.find_refresh_token(

@@ -87,6 +87,14 @@ class TestRegisterRequest:
                 shop_name="Good Shop",
             )
 
+    def test_shop_name_can_be_omitted_for_buyer(self):
+        request = RegisterRequest(
+            email="buyer@example.com",
+            password=VALID_PASSWORD,
+            full_name="Buyer",
+        )
+        assert request.shop_name is None
+
 
 class TestLoginRequest:
     def test_accepts_a_short_password_so_the_failure_is_indistinguishable(self):
@@ -95,6 +103,14 @@ class TestLoginRequest:
         request = LoginRequest(email="a@b.co", password="x")
 
         assert request.password == "x"
+
+    def test_audience_defaults_to_storefront(self):
+        request = LoginRequest(email="a@b.co", password="x")
+        assert request.audience == "storefront"
+
+    def test_accepts_explicit_audience(self):
+        request = LoginRequest(email="a@b.co", password="x", audience="cms")
+        assert request.audience == "cms"
 
     def test_normalizes_the_email(self):
         assert LoginRequest(email=" A@B.CO ", password="x").email == "a@b.co"

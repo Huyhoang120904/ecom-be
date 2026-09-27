@@ -55,7 +55,7 @@ class IdentityService:
         email: str,
         password: str,
         full_name: str,
-        shop_name: str,
+        shop_name: str | None = None,
     ) -> Session:
         return await self._auth().register(
             email=email,
@@ -64,8 +64,12 @@ class IdentityService:
             shop_name=shop_name,
         )
 
-    async def login(self, *, email: str, password: str) -> Session:
-        return await self._auth().login(email=email, password=password)
+    async def login(
+        self, *, email: str, password: str, audience: str = "storefront"
+    ) -> Session:
+        return await self._auth().login(
+            email=email, password=password, audience=audience
+        )
 
     async def refresh(self, token: str | None) -> Session:
         return await self._auth().refresh(token)
@@ -83,8 +87,8 @@ class IdentityService:
     # -- the caller's own account ------------------------------------------------
 
     async def me(
-        self, *, user_id: uuid.UUID, shop_id: uuid.UUID
-    ) -> tuple[User, Shop, list[tuple[Shop, Role]], list[str]]:
+        self, *, user_id: uuid.UUID, shop_id: uuid.UUID | None = None
+    ) -> tuple[User, Shop | None, list[tuple[Shop, Role]], list[str]]:
         return await self._account().me(user_id=user_id, shop_id=shop_id)
 
     async def update_profile(

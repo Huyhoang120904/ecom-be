@@ -516,3 +516,285 @@ class TestShops:
         )
 
         assert rows.scalar_one() is not None, "retired, not purged"
+
+
+class TestBuyerAndAdminServices:
+    async def test_buyer_registration_and_login(self, db_session):
+        service = IdentityService(db_session)
+        session = await service.register(
+            email="purebuyer@example.com",
+            password=PASSWORD,
+            full_name="Pure Buyer",
+            shop_name=None,
+        )
+        assert session.user.email == "purebuyer@example.com"
+        assert session.active_shop is None
+        assert session.memberships == []
+        assert session.audience == "storefront"
+
+        # Login as buyer
+        login_session = await service.login(
+            email="purebuyer@example.com",
+            password=PASSWORD,
+            audience="storefront",
+        )
+        assert login_session.active_shop is None
+        assert login_session.audience == "storefront"
+
+        # Refresh buyer session
+        refreshed = await service.refresh(login_session.refresh_token)
+        assert refreshed.active_shop is None
+        assert refreshed.audience == "storefront"
+
+        # Calling me as buyer
+        user, shop, memberships, _permissions = await service.me(
+            user_id=session.user.id, shop_id=None
+        )
+        assert user.email == "purebuyer@example.com"
+        assert shop is None
+        assert memberships == []
+
+    async def test_admin_login_requires_platform_membership(self, db_session):
+        from app.errors.identity import Forbidden
+
+        service = IdentityService(db_session)
+        # Register regular user without platform membership
+        await service.register(
+            email="regular_buyer@example.com",
+            password=PASSWORD,
+            full_name="Regular Buyer",
+            shop_name=None,
+        )
+        with pytest.raises(Forbidden):
+            await service.login(
+                email="regular_buyer@example.com",
+                password=PASSWORD,
+                audience="admin",
+            )
+
+    async def test_admin_login_and_refresh_with_platform_membership(self, db_session):
+        from app.cli import create_admin_account
+
+        admin_user = await create_admin_account(
+            db_session,
+            email="sysadmin_serv@example.com",
+            password=PASSWORD,
+            full_name="Sys Admin Service",
+        )
+        service = IdentityService(db_session)
+        session = await service.login(
+            email=admin_user.email,
+            password=PASSWORD,
+            audience="admin",
+        )
+        assert session.active_shop is None
+        assert session.audience == "admin"
+        assert "platform:metrics:read" in session.permissions
+
+        # Refresh admin session
+        refreshed = await service.refresh(session.refresh_token)
+        assert refreshed.audience == "admin"
+        assert refreshed.active_shop is None
+        assert "platform:metrics:read" in refreshed.permissions
+
+        # Calling me as admin
+        user, shop, _memberships, permissions = await service.me(
+            user_id=admin_user.id, shop_id=None
+        )
+        assert user.email == admin_user.email
+        assert shop is None
+        assert "platform:metrics:read" in permissions
+
+    async def test_cms_login_skips_a_suspended_shop(self, db_session):
+        """The oldest membership is only preferred while its shop is usable."""
+
+        service = IdentityService(db_session)
+        first = await service.register(
+            email="two_shops@example.com",
+            password=PASSWORD,
+            full_name="Two Shops",
+            shop_name="First Shop",
+        )
+        second = await shop_repository.create_shop(db_session, name="Second Shop")
+        owner_role = await role_repository.get_owner_role(db_session)
+        await membership_repository.create_membership(
+            db_session,
+            user_id=first.user.id,
+            shop_id=second.id,
+            role_id=owner_role.id,
+        )
+        assert first.active_shop is not None
+        await shop_repository.set_shop_active(db_session, first.active_shop.id, False)
+
+        session = await service.login(
+            email="two_shops@example.com", password=PASSWORD, audience="cms"
+        )
+
+        assert session.active_shop is not None
+        assert session.active_shop.id == second.id
+
+    async def test_cms_login_is_refused_when_every_shop_is_suspended(self, db_session):
+        service = IdentityService(db_session)
+        registered = await service.register(
+            email="suspended_only@example.com",
+            password=PASSWORD,
+            full_name="Suspended Only",
+            shop_name="Suspended Shop",
+        )
+        assert registered.active_shop is not None
+        await shop_repository.set_shop_active(
+            db_session, registered.active_shop.id, False
+        )
+
+        with pytest.raises(AccountInactive):
+            await service.login(
+                email="suspended_only@example.com",
+                password=PASSWORD,
+                audience="cms",
+            )
+
+    async def test_refresh_refuses_when_the_bound_shop_was_suspended(self, db_session):
+        """The refusal kills the whole family, not only the token that was presented."""
+
+        from app.utils.identity import hash_refresh_token
+
+        service = IdentityService(db_session)
+        session = await service.register(
+            email="refresh_shop@example.com",
+            password=PASSWORD,
+            full_name="Refresh Shop",
+            shop_name="Refresh Shop",
+        )
+        # Rotate once, so the family holds a live row *and* a replaced one: a refusal
+        # that only revoked the presented row would leave the live sibling usable.
+        rotated = await service.refresh(session.refresh_token)
+        assert rotated.active_shop is not None
+        live = await refresh_token_repository.find_refresh_token(
+            db_session, hash_refresh_token(rotated.refresh_token)
+        )
+        assert live is not None
+        # A *second* live row in the same family, so a refusal that revoked only the
+        # token it was handed would leave something usable behind and fail here.
+        await refresh_token_repository.create_refresh_token(
+            db_session,
+            user_id=live.user_id,
+            active_shop_id=live.active_shop_id,
+            audience=live.audience,
+            token_hash=hash_refresh_token("sibling-token"),
+            expires_at=live.expires_at,
+            family_id=live.family_id,
+        )
+        await shop_repository.set_shop_active(db_session, rotated.active_shop.id, False)
+
+        with pytest.raises(ShopNotAccessible):
+            await service.refresh(rotated.refresh_token)
+
+        presented = await refresh_token_repository.find_refresh_token(
+            db_session, hash_refresh_token(rotated.refresh_token)
+        )
+        assert presented is not None and presented.revoked_at is not None
+        sibling = await refresh_token_repository.find_refresh_token(
+            db_session, hash_refresh_token("sibling-token")
+        )
+        assert sibling is not None and sibling.revoked_at is not None
+        assert (
+            await refresh_token_repository.list_unrevoked_family(
+                db_session, presented.family_id
+            )
+            == []
+        )
+
+        with pytest.raises(InvalidToken):
+            await service.refresh(rotated.refresh_token)
+
+    async def test_refresh_refuses_when_the_platform_role_was_revoked(self, db_session):
+        from app.cli import create_admin_account
+        from app.errors.identity import Forbidden
+        from app.utils.identity import hash_refresh_token
+
+        admin_user = await create_admin_account(
+            db_session,
+            email="demoted_admin@example.com",
+            password=PASSWORD,
+            full_name="Demoted Admin",
+        )
+        service = IdentityService(db_session)
+        session = await service.login(
+            email=admin_user.email, password=PASSWORD, audience="admin"
+        )
+        rotated = await service.refresh(session.refresh_token)
+        live = await refresh_token_repository.find_refresh_token(
+            db_session, hash_refresh_token(rotated.refresh_token)
+        )
+        assert live is not None
+        await refresh_token_repository.create_refresh_token(
+            db_session,
+            user_id=live.user_id,
+            active_shop_id=live.active_shop_id,
+            audience=live.audience,
+            token_hash=hash_refresh_token("admin-sibling-token"),
+            expires_at=live.expires_at,
+            family_id=live.family_id,
+        )
+
+        await membership_repository.soft_delete_platform_membership(
+            db_session, admin_user.id
+        )
+
+        with pytest.raises(Forbidden):
+            await service.refresh(rotated.refresh_token)
+
+        presented = await refresh_token_repository.find_refresh_token(
+            db_session, hash_refresh_token(rotated.refresh_token)
+        )
+        assert presented is not None and presented.revoked_at is not None
+        sibling = await refresh_token_repository.find_refresh_token(
+            db_session, hash_refresh_token("admin-sibling-token")
+        )
+        assert sibling is not None and sibling.revoked_at is not None
+        assert (
+            await refresh_token_repository.list_unrevoked_family(
+                db_session, presented.family_id
+            )
+            == []
+        )
+
+        with pytest.raises(InvalidToken):
+            await service.refresh(rotated.refresh_token)
+
+    @pytest.mark.parametrize("bad_audience", ["legacy", ""])
+    async def test_refresh_refuses_an_audience_the_software_does_not_recognise(
+        self, db_session, bad_audience
+    ):
+        """A corrupt stored value must not be replayed as a wider perimeter.
+
+        The session is shop-bound and one of the stored values is falsy, because the
+        fallback this guards against (``stored.audience or "cms"``) would turn ``""``
+        into a CMS session for that shop — the widening, not just the wrong label.
+        """
+
+        import uuid
+        from datetime import UTC, datetime, timedelta
+
+        from app.utils.identity import hash_refresh_token
+
+        service = IdentityService(db_session)
+        registered = await service.register(
+            email=f"corrupt_audience_{bad_audience or 'empty'}@example.com",
+            password=PASSWORD,
+            full_name="Corrupt Audience",
+            shop_name="Corrupt Shop",
+        )
+        assert registered.active_shop is not None
+        await refresh_token_repository.create_refresh_token(
+            db_session,
+            user_id=registered.user.id,
+            active_shop_id=registered.active_shop.id,
+            audience=bad_audience,
+            token_hash=hash_refresh_token("corrupt-audience-token"),
+            expires_at=datetime.now(UTC) + timedelta(days=30),
+            family_id=uuid.uuid4(),
+        )
+
+        with pytest.raises(InvalidToken):
+            await service.refresh("corrupt-audience-token")

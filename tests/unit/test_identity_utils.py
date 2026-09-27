@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import jwt
 import pytest
 
 from app.config.settings import get_settings
@@ -313,6 +314,122 @@ class TestAccessTokens:
         )
         with pytest.raises(utils.InvalidAccessToken):
             utils.decode_access_token(settings, foreign)
+
+    def test_issue_access_token_storefront_buyer(self):
+        settings = get_settings()
+        user_id = utils.new_id()
+        token = utils.issue_access_token(
+            settings,
+            user_id=user_id,
+            audience="storefront",
+            active_shop_id=None,
+        )
+        claims = utils.decode_access_token(settings, token)
+        assert claims["sub"] == user_id
+        assert claims["aud"] == "storefront"
+        assert claims.get("sid") is None
+
+    def test_issue_access_token_admin(self):
+        settings = get_settings()
+        user_id = utils.new_id()
+        token = utils.issue_access_token(
+            settings,
+            user_id=user_id,
+            audience="admin",
+            active_shop_id=None,
+        )
+        claims = utils.decode_access_token(settings, token)
+        assert claims["sub"] == user_id
+        assert claims["aud"] == "admin"
+        assert claims.get("sid") is None
+
+    def test_issue_access_token_cms_requires_active_shop_id(self):
+        settings = get_settings()
+        with pytest.raises(ValueError, match="active_shop_id is required"):
+            utils.issue_access_token(
+                settings,
+                user_id=utils.new_id(),
+                audience="cms",
+                active_shop_id=None,
+            )
+
+    def test_issue_access_token_rejects_a_shop_id_for_a_non_cms_audience(self):
+        """``sid`` only means something inside one shop's perimeter."""
+
+        settings = get_settings()
+        with pytest.raises(ValueError, match="only valid for cms audience"):
+            utils.issue_access_token(
+                settings,
+                user_id=utils.new_id(),
+                audience="storefront",
+                active_shop_id=utils.new_id(),
+            )
+
+    def test_decode_access_token_rejects_an_audience_claim_that_is_not_a_string(self):
+        """A JSON array for ``aud`` is a malformed token, not a server error.
+
+        PyJWT accepts a list claim and matches it against the allowed audiences, so
+        the refusal has to happen here; testing membership in a frozenset with an
+        unhashable value would raise ``TypeError`` instead.
+        """
+
+        settings = get_settings()
+        now = datetime.now(UTC)
+        payload = {
+            "sub": utils.new_id(),
+            "aud": ["cms"],
+            "type": "access",
+            "iss": utils.ISSUER,
+            "jti": "abc",
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(hours=1)).timestamp()),
+        }
+        encoded = jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+        with pytest.raises(utils.InvalidAccessToken, match="invalid audience"):
+            utils.decode_access_token(settings, encoded)
+
+    def test_decode_access_token_cms_requires_sid(self):
+        settings = get_settings()
+        now = datetime.now(UTC)
+        payload = {
+            "sub": utils.new_id(),
+            "aud": "cms",
+            "type": "access",
+            "iss": utils.ISSUER,
+            "jti": "abc",
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(hours=1)).timestamp()),
+        }
+        encoded = jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+        with pytest.raises(utils.InvalidAccessToken, match="missing active shop claim"):
+            utils.decode_access_token(settings, encoded)
+
+    def test_decode_access_token_rejects_unknown_audience(self):
+        settings = get_settings()
+        now = datetime.now(UTC)
+        payload = {
+            "sub": utils.new_id(),
+            "aud": "invalid_aud",
+            "type": "access",
+            "iss": utils.ISSUER,
+            "jti": "abc",
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(hours=1)).timestamp()),
+        }
+        encoded = jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+        with pytest.raises(utils.InvalidAccessToken, match="Audience doesn't match"):
+            utils.decode_access_token(settings, encoded)
+
+    def test_decode_access_token_expected_audience_mismatch(self):
+        settings = get_settings()
+        token = utils.issue_access_token(
+            settings,
+            user_id=utils.new_id(),
+            audience="storefront",
+            active_shop_id=None,
+        )
+        with pytest.raises(utils.InvalidAccessToken, match="audience mismatch"):
+            utils.decode_access_token(settings, token, expected_audience="cms")
 
 
 class TestRefreshTokens:
